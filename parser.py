@@ -25,13 +25,11 @@ def parse_cp_file(filepath):
 def build_graph(edges, tolerance=1e-6):
     G = nx.Graph()
     
-    # collect all unique vertices with tolerance-based merging
     raw_points = []
     for _, x1, y1, x2, y2 in edges:
         raw_points.append((x1, y1))
         raw_points.append((x2, y2))
     
-    # merge near-duplicate points
     unique_points = []
     point_map = {}
     for pt in raw_points:
@@ -45,18 +43,15 @@ def build_graph(edges, tolerance=1e-6):
             point_map[pt] = len(unique_points)
             unique_points.append(pt)
     
-    # add nodes
     for i, (x, y) in enumerate(unique_points):
         G.add_node(i, x=x, y=y)
     
-    # add edges
     for fold_type, x1, y1, x2, y2 in edges:
         u = point_map[(x1, y1)]
         v = point_map[(x2, y2)]
         if u != v:
             G.add_edge(u, v, fold_type=fold_type)
     
-    # compute node features: degree and sorted angles
     for node in G.nodes():
         neighbors = list(G.neighbors(node))
         nx_coord = G.nodes[node]['x']

@@ -5,7 +5,6 @@ import networkx as nx
 from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.loader import DataLoader
 
-# --- load both ---
 with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl", 'rb') as f:
     positives = pickle.load(f)
 
@@ -14,9 +13,7 @@ with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb
 
 print(f"Positives: {len(positives)}, Negatives: {len(negatives)}")
 
-# --- convert a single NetworkX graph to PyG Data object ---
 def nx_to_pyg(G):
-    # node features: [x, y, degree, angle_mean, angle_std]
     node_features = []
     for node in G.nodes():
         x = G.nodes[node]['x']
@@ -47,7 +44,6 @@ def nx_to_pyg(G):
     
     return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=label)
 
-# --- convert all graphs ---
 all_graphs = positives + negatives
 dataset = []
 
@@ -61,7 +57,6 @@ for G in all_graphs:
 
 print(f"Total dataset size: {len(dataset)} (skipped {skipped} empty graphs)")
 
-# --- shuffle and split 80/10/10 ---
 import random
 random.shuffle(dataset)
 
@@ -75,14 +70,12 @@ test_set  = dataset[val_end:]
 
 print(f"Train: {len(train_set)}, Val: {len(val_set)}, Test: {len(test_set)}")
 
-# --- save ---
 torch.save(train_set, r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\train.pt")
 torch.save(val_set,   r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\val.pt")
 torch.save(test_set,  r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\test.pt")
 
 print("Saved train/val/test splits")
 
-# --- create dataloaders ---
 train_loader = DataLoader(train_set, batch_size=32, shuffle=True)
 val_loader   = DataLoader(val_set,   batch_size=32, shuffle=False)
 test_loader  = DataLoader(test_set,  batch_size=32, shuffle=False)

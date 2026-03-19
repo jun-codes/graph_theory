@@ -10,7 +10,6 @@ from torch_geometric.data import Data
 from torch.nn import Linear, BatchNorm1d, Sequential, ReLU
 from torch_geometric.nn import GINConv, global_mean_pool, global_max_pool
 
-# --- load model ---
 class GINClassifier(torch.nn.Module):
     def __init__(self, in_channels=5, hidden=64, num_classes=2):
         super().__init__()
@@ -42,7 +41,6 @@ model.load_state_dict(torch.load(
 model.eval()
 print("Model loaded")
 
-# --- generate fresh random planar graphs (never seen before) ---
 def generate_random_graph(scale=200.0):
     num_points = random.randint(50, 150)
     points     = np.random.uniform(-scale+10, scale-10, (num_points, 2))
@@ -77,7 +75,6 @@ def generate_random_graph(scale=200.0):
     G.graph['label'] = 0
     return G
 
-# --- convert to PyG ---
 def nx_to_pyg(G):
     node_features = []
     for node in G.nodes():
@@ -102,7 +99,6 @@ def nx_to_pyg(G):
     batch      = torch.zeros(x_tensor.size(0), dtype=torch.long)
     return x_tensor, edge_index, batch
 
-# --- run on 200 fresh random graphs ---
 print("\nTesting on 200 fresh random planar graphs (never seen)...")
 correct = 0
 total   = 200
@@ -123,7 +119,7 @@ for i in range(total):
         out  = model(x_tensor, edge_index, batch)
         pred = out.argmax(dim=1).item()
 
-    if pred == 0:  # correctly identified as invalid
+    if pred == 0:  
         correct += 1
 
 print(f"\nResults on random planar graphs:")

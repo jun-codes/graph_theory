@@ -16,8 +16,8 @@ def get_stats(graphs):
         'n_mountain':   [],
         'n_valley':     [],
         'n_border':     [],
-        'mv_ratio':     [],  # mountain/valley ratio — should be ~1 for valid CPs
-        'avg_angles':   [],  # avg number of angles per node
+        'mv_ratio':     [],  
+        'avg_angles':   [],  
     }
     for G in graphs:
         nodes = G.number_of_nodes()
@@ -44,7 +44,6 @@ def get_stats(graphs):
 pos_stats = get_stats(positives)
 neg_stats = get_stats(negatives)
 
-# --- print summary table ---
 metrics = ['nodes', 'edges', 'avg_degree', 'n_mountain', 'n_valley', 'n_border', 'mv_ratio', 'avg_angles']
 print(f"{'Metric':<20} {'Positives Mean':>16} {'Positives Std':>14} {'Negatives Mean':>16} {'Negatives Std':>14}")
 print("-" * 82)

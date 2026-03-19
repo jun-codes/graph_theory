@@ -8,7 +8,6 @@ from torch_geometric.loader import DataLoader
 from torch.nn import Linear, BatchNorm1d, Sequential, ReLU
 from torch_geometric.nn import GINConv, global_mean_pool, global_max_pool
 
-# --- same model definition (must match exactly) ---
 class GINClassifier(torch.nn.Module):
     def __init__(self, in_channels=5, hidden=64, num_classes=2):
         super().__init__()
@@ -32,7 +31,6 @@ class GINClassifier(torch.nn.Module):
                         global_max_pool(x, batch)], dim=1)
         return self.classifier(x)
 
-# --- load model ---
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
 model.load_state_dict(torch.load(
@@ -41,7 +39,6 @@ model.load_state_dict(torch.load(
 model.eval()
 print("Model loaded")
 
-# --- option 1: test a .cp file ---
 def test_cp_file(filepath):
     edges = []
     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
@@ -59,16 +56,14 @@ def test_png_file(filepath):
     img  = cv2.imread(filepath)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # resize to standard size for consistency
     gray = cv2.resize(gray, (800, 800))
 
     blurred   = cv2.GaussianBlur(gray, (5, 5), 0)
     edges_img = cv2.Canny(blurred, 50, 150)
 
-    # stricter hough — longer min line, less gap tolerance
     lines = cv2.HoughLinesP(edges_img, rho=1, theta=np.pi/180,
-                             threshold=80,       # higher = fewer false lines
-                             minLineLength=40,   # ignore short fragments
+                             threshold=80,       
+                             minLineLength=40,   
                              maxLineGap=10)
     edges = []
     if lines is not None:
@@ -79,7 +74,7 @@ def test_png_file(filepath):
     return edges
 
 
-def build_graph_from_edges(edges, tolerance=8.0):  # ← much larger for PNG pixels
+def build_graph_from_edges(edges, tolerance=8.0):  
     G = nx.Graph()
     raw_points = []
     for _, x1, y1, x2, y2 in edges:
@@ -123,7 +118,6 @@ def build_graph_from_edges(edges, tolerance=8.0):  # ← much larger for PNG pix
 
     return G
 
-# --- convert to PyG and predict ---
 def predict(G):
     node_features = []
     for node in G.nodes():
@@ -157,13 +151,12 @@ def predict(G):
         prob = torch.softmax(out, dim=1)
         pred = out.argmax(dim=1).item()
 
-    label = "✅ VALID crease pattern" if pred == 1 else "❌ NOT a crease pattern"
+    label = " VALID crease pattern" if pred == 1 else " NOT a crease pattern"
     print(f"\n  Prediction : {label}")
     print(f"  Confidence : {prob[0][pred].item()*100:.1f}%")
     print(f"  (valid={prob[0][1].item()*100:.1f}%, invalid={prob[0][0].item()*100:.1f}%)")
 
-# --- run test ---
-# change this to your file path, works for both .cp and .png
+
 test_file = r"C:\Users\Arjun\Desktop\test_cp.png"   # ← change this
 
 print(f"\nTesting: {test_file}")
