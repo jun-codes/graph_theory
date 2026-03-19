@@ -199,20 +199,21 @@ def visualise(G, title="Generated CP", ax=None):
 
 def run_ga(
     population_size = 50,
-    generations     = 20,
-    elite_keep      = 10,   
-    mutations_per   = 3,    
-    seed_from_real  = 0.5,  
+    generations     = 80,
+    elite_keep      = 10,
+    mutations_per   = 3,
 ):
     print(f"\nStarting GA — pop={population_size}, generations={generations}")
 
+    with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb') as f:
+        negatives = pickle.load(f)
+
     population = []
     for i in range(population_size):
-        G = copy.deepcopy(random.choice(real_cps))
-        for _ in range(2):
-            G = mutate(G)
+        G = copy.deepcopy(random.choice(negatives))
+        G = recompute_features(G)
         population.append(G)
-    print(f"Initial population: {len(population)} individuals")
+    print(f"Initial population: {len(population)} individuals seeded from corrupted CPs")
 
     best_scores  = []
     mean_scores  = []
@@ -258,7 +259,6 @@ def run_ga(
 
     print(f"\nGA complete — best fitness: {best_ever_score:.4f}")
 
-
     plt.figure(figsize=(8,4))
     plt.plot(best_scores, label='Best fitness',  color='blue')
     plt.plot(mean_scores, label='Mean fitness',  color='orange', linestyle='--')
@@ -281,13 +281,13 @@ def run_ga(
 
     with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\best_generated.pkl", 'wb') as f_out:
         pickle.dump(best_ever, f_out)
-    print("Best generated CP saved to best_generated.pkl")
+    print("Best generated CP saved")
 
     return best_ever, scored
 
 best, results = run_ga(
     population_size = 50,
-    generations     = 20,
+    generations     = 80,
     elite_keep      = 10,
     mutations_per   = 3,
 )
