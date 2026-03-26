@@ -205,7 +205,7 @@ def run_ga(
 ):
     print(f"\nStarting GA — pop={population_size}, generations={generations}")
 
-    with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb') as f:
+    with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl", 'rb') as f:
         negatives = pickle.load(f)
 
     population = []

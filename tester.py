@@ -157,7 +157,7 @@ def predict(G):
     print(f"  (valid={prob[0][1].item()*100:.1f}%, invalid={prob[0][0].item()*100:.1f}%)")
 
 
-test_file = r"C:\Users\Arjun\Desktop\test_cp.png"   # ← change this
+test_file = r"C:\Users\Arjun\Desktop\test_cp.png"   
 
 print(f"\nTesting: {test_file}")
 if test_file.endswith('.cp'):
