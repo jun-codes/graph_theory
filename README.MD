@@ -118,4 +118,23 @@ Line-Filtered GA Smoke Run:
 
 The filter improved the line-GNN score slightly for the single best candidate and reduced Kawasaki residuals in the diverse set, but it did not produce valid line-GNN candidates in 20 generations. This suggests the next bottleneck is the GA repair/mutation operators, especially local Kawasaki/Maekawa repair, not just classifier scoring.
 
+Gradient Geometry Repair Experiment:
+
+- Script: Genetic_Algo_Line_Filtered_Repaired.py
+- Repair utility: gradient_geometry_repair.py
+- Method: PyTorch gradient descent on mutable node coordinates, with border nodes fixed, targeting Kawasaki residual, mirror symmetry, and short-edge degeneracy. Repaired candidates are rejected if they introduce crease crossings.
+- Run settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
+- Initial seed repairs accepted: 22/30
+- Best repaired output: line_repaired_best_generated.pkl
+  - line-GNN valid probability: 0.0005
+  - predicted invalid
+  - mean Kawasaki residual: 0.9922
+  - mean Maekawa residual: 2.0000
+- Repaired diverse top 6: line_repaired_diverse_top6.pkl
+  - all six predicted invalid
+  - mean Kawasaki residual: 0.9327
+  - mean Maekawa residual: 1.8972
+
+The gradient repair successfully lowers Kawasaki for selected candidates and can improve symmetry, but it cannot fix Maekawa because Maekawa depends on discrete mountain/valley counts, not coordinates. The next repair step should be a discrete fold-assignment repair for Maekawa, paired with the gradient Kawasaki/symmetry repair.
+
 
