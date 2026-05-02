@@ -24,6 +24,7 @@ Core Training and Evaluation:
 
 Generation:
 - Genetic_Algo.py: Evolves crease patterns using the trained GNN as a fitness function. Computes Kawasaki and Maekawa penalties (folding constraints), mutates graphs, and selects high-scoring candidates.
+- Genetic_Algo_Line_Filtered.py: Separate experimental copy of the GA that adds a conservative line-GNN validity penalty. It writes line_filtered_best_generated.pkl, line_filtered_diverse_top6.pkl, line_ga_convergence.png, and line_ga_top6.png without overwriting the original GA outputs.
 - random_graph_generator.py: Generates synthetic random graphs using Delaunay triangulation. Assigns fold types (mountain, valley, border) and node features (angle sequences, degree).
 
 Visualization:
@@ -99,6 +100,22 @@ Recent Line-Graph Results:
 
 Current Direction:
 
-The line-GNN is useful as a conservative filter for generated crease patterns. The next experiment is to copy Genetic_Algo.py into a separate line-filtered GA script and subtract a line-GNN penalty from candidate fitness without changing the original GA.
+The line-GNN is useful as a conservative filter for generated crease patterns. A separate line-filtered GA smoke run was added without changing the original GA.
+
+Line-Filtered GA Smoke Run:
+
+- Script: Genetic_Algo_Line_Filtered.py
+- Run settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
+- Best generated output: line_filtered_best_generated.pkl
+  - line-GNN valid probability: 0.0081
+  - predicted invalid
+  - mean Kawasaki residual: 1.7315
+  - mean Maekawa residual: 1.3333
+- Diverse top 6 output: line_filtered_diverse_top6.pkl
+  - all six predicted invalid
+  - mean Kawasaki residual: 0.7487
+  - mean Maekawa residual: 1.5297
+
+The filter improved the line-GNN score slightly for the single best candidate and reduced Kawasaki residuals in the diverse set, but it did not produce valid line-GNN candidates in 20 generations. This suggests the next bottleneck is the GA repair/mutation operators, especially local Kawasaki/Maekawa repair, not just classifier scoring.
 
 
