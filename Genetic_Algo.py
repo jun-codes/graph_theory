@@ -1,13 +1,14 @@
 """
-GA.py  —  Mori-style genetic algorithm for origami crease pattern generation v5
+GA.py  —  Mori-style genetic algorithm for origami crease pattern generation v6
 ================================================================================
-Key changes vs v4:
-  • Seeds from make_random_planar_graph() (genuine exploration, not CP repair)
-  • Border nodes defined by COORDINATES (x≈±195 or y≈±195), never features
-  • Spatial index (RTee via shapely STRtree) for O(log E) crossing checks
-  • Kawasaki repair budget reduced for speed
-  • Minimum interior edges enforced at seed time
-  • Population diversity injection every 20 gens (10 % fresh random seeds)
+Key changes vs v5:
+  • Analytical Kawasaki repair via numerical gradient descent (replaces random nudge)
+  • Even-degree enforcement on interior nodes (Kawasaki requires 2n creases)
+  • Dedicated kaw_repair mutation (30 % weight)
+  • Maekawa-aware fold assignment during seeding (|M-V|=2)
+  • Kawasaki pre-optimisation on all seeds before GA starts
+  • Higher Kawasaki weight in fitness: 0.60 → 1.00 (was 0.35 → 0.80)
+  • Population-wide Kawasaki repair every 5 generations
 """
 
 import copy
@@ -19,10 +20,16 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import torch
+from cp_io import write_cp_collection, write_cp_file
 from shapely.geometry import LineString
 from shapely.strtree import STRtree
 from torch.nn import BatchNorm1d, Linear, ReLU, Sequential
 from torch_geometric.nn import GINConv, global_max_pool, global_mean_pool
+
+SYMMETRY_MODE = "diagonal"   # options: "vertical", "diagonal"
+
+ODD_KAW_PENALTY = math.pi
+MIN_INCIDENT_ANGLE = math.radians(8.0)
 
 BASE    = r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project"
 MAX_GEN = 80
@@ -72,6 +79,14 @@ def _mae_at(G, node):
     m = sum(1 for nb in nbs if G[node][nb].get('fold_type') == 2)
     v = sum(1 for nb in nbs if G[node][nb].get('fold_type') == 3)
     return float(abs(abs(m - v) - 2))
+
+def reflect_point(x, y, mode):
+    if mode == "vertical":
+        return -x, y
+    elif mode == "diagonal":   # y = x
+        return y, x
+    else:
+        return x, y
 
 
 def extract_node_features(G, scale=SCALE):
@@ -218,6 +233,55 @@ def any_incident_crosses(G, node, tree=None, segs=None, meta=None):
 # Graph utilities
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _candidate_min_gap(G, node, other):
+    """Minimum angular gap at node if edge (node, other) were present."""
+    cx, cy = G.nodes[node]['x'], G.nodes[node]['y']
+    angles = [
+        math.atan2(G.nodes[nb]['y'] - cy, G.nodes[nb]['x'] - cx)
+        for nb in G.neighbors(node)
+    ]
+    angles.append(math.atan2(G.nodes[other]['y'] - cy,
+                             G.nodes[other]['x'] - cx))
+    if len(angles) < 2:
+        return 2 * math.pi
+    angles.sort()
+    gaps = [angles[(i + 1) % len(angles)] - angles[i]
+            for i in range(len(angles))]
+    gaps = [g + 2 * math.pi if g < 0 else g for g in gaps]
+    return min(gaps)
+
+
+def respects_min_incident_angle(G, u, v, min_gap=MIN_INCIDENT_ANGLE):
+    """Reject edges that create nearly duplicate rays at either endpoint."""
+    return (_candidate_min_gap(G, u, v) >= min_gap and
+            _candidate_min_gap(G, v, u) >= min_gap)
+
+
+def _kaw_penalty_at(G, node):
+    """GA-facing Kawasaki penalty for one vertex."""
+    if not is_interior(G, node):
+        return 0.0
+    penalty = _kaw_at(G, node)
+    if G.degree(node) % 2 != 0:
+        penalty += ODD_KAW_PENALTY
+    return penalty
+
+
+def _local_kaw_objective(G, node):
+    affected = {node}
+    affected.update(nb for nb in G.neighbors(node) if is_interior(G, nb))
+    return sum(_kaw_penalty_at(G, n) for n in affected)
+
+
+def kawasaki_stats(G):
+    interior = [n for n in G.nodes() if is_interior(G, n)]
+    if not interior:
+        return 0.0, 0.0, 0, 0
+    vals = [_kaw_at(G, n) for n in interior]
+    odd_count = sum(1 for n in interior if G.degree(n) % 2 != 0)
+    return float(np.mean(vals)), float(np.max(vals)), odd_count, len(interior)
+
+
 def recompute_features(G):
     for node in G.nodes():
         neighbors = list(G.neighbors(node))
@@ -231,50 +295,256 @@ def recompute_features(G):
     return G
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Local Kawasaki repair  (reduced budget for speed)
+# Analytical Kawasaki repair via numerical gradient descent
 # ─────────────────────────────────────────────────────────────────────────────
 
-def local_kaw_repair(G, node, n_tries=15, step=4.0):
-    """Nudge one interior (non-border) node to reduce Kawasaki violation."""
-    if is_border_node(G, node):
+def analytical_kaw_repair(G, node, max_iter=50, lr=3.0, tree=None, segs=None, meta=None):
+    """Gradient descent on Kawasaki violation at a single interior node.
+    Computes numerical gradient of the Kawasaki error w.r.t. node (x,y)
+    and takes steps in the negative-gradient direction."""
+    if not is_interior(G, node):
         return
+
     lim = BORDER - 5
+    eps = 0.5  # finite-difference step for gradient
 
-    def local_v():
-        return _kaw_at(G, node) + sum(
-            _kaw_at(G, nb)
-            for nb in G.neighbors(node)
-            if not is_border_node(G, nb))
+    if tree is None:
+        tree, segs, meta = _build_strtree(G, exclude_nodes=(node,))
 
-    bv  = local_v()
-    bx  = G.nodes[node]['x']
-    by_ = G.nodes[node]['y']
+    best_x = G.nodes[node]['x']
+    best_y = G.nodes[node]['y']
+    best_self = _kaw_penalty_at(G, node)
+    best_obj = _local_kaw_objective(G, node)
+    cur_lr = lr
 
-    tree, segs, meta = _build_strtree(G, exclude_nodes=(node,))
+    for _ in range(max_iter):
+        if best_self < 0.005 and best_obj < 0.02:
+            break
 
-    for _ in range(n_tries):
-        nx_ = np.clip(bx + random.uniform(-step, step), -lim, lim)
-        ny_ = np.clip(by_ + random.uniform(-step, step), -lim, lim)
+        cx, cy = G.nodes[node]['x'], G.nodes[node]['y']
+
+        # ∂kaw/∂x  (numerical)
+        G.nodes[node]['x'] = cx + eps
+        vx = _local_kaw_objective(G, node)
+        G.nodes[node]['x'] = cx - eps
+        vx2 = _local_kaw_objective(G, node)
+        G.nodes[node]['x'] = cx
+
+        # ∂kaw/∂y  (numerical)
+        G.nodes[node]['y'] = cy + eps
+        vy = _local_kaw_objective(G, node)
+        G.nodes[node]['y'] = cy - eps
+        vy2 = _local_kaw_objective(G, node)
+        G.nodes[node]['y'] = cy
+
+        gx = (vx - vx2) / (2 * eps)
+        gy = (vy - vy2) / (2 * eps)
+        norm = math.sqrt(gx * gx + gy * gy) + 1e-8
+
+        # Step in negative-gradient direction
+        nx_ = np.clip(cx - cur_lr * gx / norm, -lim, lim)
+        ny_ = np.clip(cy - cur_lr * gy / norm, -lim, lim)
+
         G.nodes[node]['x'] = nx_
         G.nodes[node]['y'] = ny_
+
         if any_incident_crosses(G, node, tree, segs, meta):
-            G.nodes[node]['x'] = bx
-            G.nodes[node]['y'] = by_
+            G.nodes[node]['x'] = cx
+            G.nodes[node]['y'] = cy
+            cur_lr *= 0.5
             continue
-        v = local_v()
-        if v < bv:
-            bv = v; bx = nx_; by_ = ny_
-    G.nodes[node]['x'] = bx
-    G.nodes[node]['y'] = by_
+
+        obj_new = _local_kaw_objective(G, node)
+        self_new = _kaw_penalty_at(G, node)
+        if (obj_new < best_obj - 1e-6 or
+                (abs(obj_new - best_obj) <= 1e-6 and self_new < best_self)):
+            best_obj = obj_new
+            best_self = self_new
+            best_x = nx_
+            best_y = ny_
+        else:
+            # Restore and shrink step
+            G.nodes[node]['x'] = cx
+            G.nodes[node]['y'] = cy
+            cur_lr *= 0.6
+
+    G.nodes[node]['x'] = best_x
+    G.nodes[node]['y'] = best_y
+
+
+def full_kaw_repair(G, max_passes=3):
+    """Run analytical Kawasaki repair on ALL interior nodes, multiple passes."""
+    for _ in range(max_passes):
+        enforce_even_degree(G)
+        ranked = sorted(
+            [(_kaw_penalty_at(G, node), node)
+             for node in list(G.nodes()) if is_interior(G, node)],
+            reverse=True
+        )
+        if not ranked:
+            break
+        for v, node in ranked:
+            if v <= 0.005:
+                break
+            analytical_kaw_repair(G, node)
+        worst_v = max((_kaw_penalty_at(G, node) for node in G.nodes()
+                       if is_interior(G, node)),
+                      default=0.0)
+        if worst_v < 0.01:
+            break
+    recompute_features(G)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Even-degree enforcement  (Kawasaki requires 2n creases at each vertex)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_EDGE_LEN = 250.0   # only penalise truly extreme edges (square diagonal ~550)
+MAX_EDGE_ADD = 180.0   # allow medium-length edges when adding
+
+
+def _edge_len(G, u, v):
+    """Euclidean length of edge (u, v)."""
+    dx = G.nodes[u]['x'] - G.nodes[v]['x']
+    dy = G.nodes[u]['y'] - G.nodes[v]['y']
+    return math.sqrt(dx * dx + dy * dy)
+
+
+def enforce_even_degree(G):
+    """Ensure all interior (non-border) nodes have even degree.
+    Kawasaki's theorem requires 2n creases meeting at a vertex.
+    For odd-degree nodes: try to add one SHORT edge to a nearby non-neighbor,
+    or remove the longest interior edge as fallback."""
+    for node in list(G.nodes()):
+        if is_border_node(G, node):
+            continue
+        nbs = list(G.neighbors(node))
+        if all(G[node][nb].get('fold_type') == 1 for nb in nbs):
+            continue
+        if len(nbs) % 2 == 0:
+            continue
+
+        # ── Strategy 1: add one SHORT edge to nearest non-neighbour ──
+        nx_, ny_ = G.nodes[node]['x'], G.nodes[node]['y']
+        candidates = []
+        for cand in G.nodes():
+            if cand == node or cand in nbs:
+                continue
+            if is_border_node(G, cand):
+                bucket = 2
+            elif G.degree(cand) % 2 != 0:
+                bucket = 0
+            else:
+                bucket = 1
+            dist2 = ((G.nodes[cand]['x'] - nx_) ** 2 +
+                     (G.nodes[cand]['y'] - ny_) ** 2)
+            candidates.append((bucket, dist2, cand))
+        candidates.sort()
+        added = False
+        for _, _, cand in candidates[:25]:
+            dist = math.sqrt((G.nodes[cand]['x'] - nx_)**2 +
+                             (G.nodes[cand]['y'] - ny_)**2)
+            if dist > MAX_EDGE_ADD:
+                continue
+            if not respects_min_incident_angle(G, node, cand):
+                continue
+            if not edge_crosses_any(G, node, cand):
+                m = sum(1 for nb in nbs if G[node][nb].get('fold_type') == 2)
+                v = sum(1 for nb in nbs if G[node][nb].get('fold_type') == 3)
+                ft = 3 if m > v else 2
+                G.add_edge(node, cand, fold_type=ft)
+                added = True
+                break
+        if added:
+            continue
+
+        # ── Strategy 2: remove longest interior edge ──
+        int_edges = [(node, nb) for nb in nbs
+                     if G[node][nb].get('fold_type') != 1]
+        if int_edges:
+            longest = max(int_edges, key=lambda e: _edge_len(G, *e))
+            G.remove_edge(*longest)
+
+
+def trim_long_edges(G, max_len=MAX_EDGE_LEN):
+    """Remove all interior edges longer than max_len. Keeps graph connected."""
+    to_remove = []
+    for u, v, d in G.edges(data=True):
+        if d.get('fold_type') == 1:
+            continue
+        if _edge_len(G, u, v) > max_len:
+            to_remove.append((u, v))
+    # Sort longest first, remove greedily while keeping connectivity
+    to_remove.sort(key=lambda e: _edge_len(G, *e), reverse=True)
+    for u, v in to_remove:
+        if G.has_edge(u, v) and nx.is_connected(G):
+            G.remove_edge(u, v)
+            if not nx.is_connected(G):
+                G.add_edge(u, v, fold_type=random.choice([2, 3]))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Maekawa-aware fold assignment  (|M - V| = 2 at each interior vertex)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def assign_folds_maekawa(G):
+    """Assign mountain/valley fold types globally to best satisfy |M-V|=2
+    at each interior vertex. Does a single pass, never overwrites already-set edges."""
+    # First: mark all interior edges as unassigned
+    unassigned = set()
+    for u, v, d in G.edges(data=True):
+        if d.get('fold_type') != 1:
+            unassigned.add((min(u, v), max(u, v)))
+
+    # Process interior nodes in order of degree (most constrained first)
+    int_nodes = []
+    for node in G.nodes():
+        if is_border_node(G, node):
+            continue
+        int_nbs = [nb for nb in G.neighbors(node)
+                   if G[node][nb].get('fold_type') != 1]
+        if len(int_nbs) >= 2:
+            int_nodes.append((len(int_nbs), node))
+    int_nodes.sort(reverse=True)
+
+    for _, node in int_nodes:
+        int_nbs = [nb for nb in G.neighbors(node)
+                   if G[node][nb].get('fold_type') != 1]
+        n = len(int_nbs)
+        if n < 2:
+            continue
+
+        # Count already-assigned edges at this node
+        m_assigned = sum(1 for nb in int_nbs if G[node][nb]['fold_type'] == 2)
+        v_assigned = sum(1 for nb in int_nbs if G[node][nb]['fold_type'] == 3)
+        unset_nbs = [nb for nb in int_nbs
+                     if (min(node, nb), max(node, nb)) in unassigned]
+
+        if not unset_nbs:
+            continue
+
+        # Target: |M - V| = 2, prefer M > V, so M = (n+2)//2
+        target_m = (n + 2) // 2
+        need_m = max(0, target_m - m_assigned)
+        need_v = max(0, len(unset_nbs) - need_m)
+
+        random.shuffle(unset_nbs)
+        for i, nb in enumerate(unset_nbs):
+            ft = 2 if i < need_m else 3
+            G[node][nb]['fold_type'] = ft
+            key = (min(node, nb), max(node, nb))
+            unassigned.discard(key)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Penalties / scores
 # ─────────────────────────────────────────────────────────────────────────────
 
 def kawasaki_penalty(G):
-    vals = [_kaw_at(G, n) for n in G.nodes()]
-    nonz = [v for v in vals if v > 0]
-    return float(np.mean(nonz)) if nonz else 0.0
+    mean_v, max_v, odd_count, n_interior = kawasaki_stats(G)
+    if n_interior == 0:
+        return 0.0
+    odd_frac = odd_count / n_interior
+    return mean_v + 0.35 * max_v + 0.50 * odd_frac
 
 
 def maekawa_penalty(G):
@@ -297,12 +567,47 @@ def symmetry_penalty(G, tol=25.0):
 
 
 def complexity_bonus(G):
+    """Reward graphs that stay structurally rich, not just locally valid."""
     interior_edges = [(u, v) for u, v, d in G.edges(data=True)
                       if d.get('fold_type') != 1]
-    n = len(interior_edges)
-    if n < 4:
+    n_edges = len(interior_edges)
+    n_nodes = G.number_of_nodes()
+    n_interior = sum(1 for n in G.nodes() if is_interior(G, n))
+    if n_edges < 8:
         return 0.0
-    return float(min(1.0, n / 20.0))
+
+    edge_term = min(0.80, 0.80 * n_edges / TARGET_INTERIOR_EDGES)
+    node_term = min(0.45, 0.45 * n_nodes / TARGET_TOTAL_NODES)
+    interior_term = min(0.25, 0.25 * n_interior / max(1, TARGET_TOTAL_NODES - 8))
+    return float(edge_term + node_term + interior_term)
+
+
+def edge_length_penalty(G):
+    """Penalise interior edges that are too long. Returns 0 if all edges < MAX_EDGE_LEN."""
+    lengths = []
+    for u, v, d in G.edges(data=True):
+        if d.get('fold_type') == 1:
+            continue
+        lengths.append(_edge_len(G, u, v))
+    if not lengths:
+        return 0.0
+    # Penalty = fraction of edges above threshold + mean overshoot
+    over = [max(0.0, l - MAX_EDGE_LEN) / SCALE for l in lengths]
+    frac_over = sum(1 for o in over if o > 0) / len(over)
+    mean_over = float(np.mean(over))
+    return frac_over + mean_over
+
+
+def edge_length_stats(G):
+    """Return (count, mean_len, max_len) of interior edges for diagnostics."""
+    lengths = []
+    for u, v, d in G.edges(data=True):
+        if d.get('fold_type') == 1:
+            continue
+        lengths.append(_edge_len(G, u, v))
+    if not lengths:
+        return 0, 0.0, 0.0
+    return len(lengths), float(np.mean(lengths)), float(np.max(lengths))
 
 
 def compute_similarity(G1, G2):
@@ -341,36 +646,71 @@ def gnn_score(G):
     return prob[0][1].item()
 
 
-MIN_INTERIOR_EDGES = 8
+MIN_TOTAL_NODES = 24
+TARGET_TOTAL_NODES = 32
+MIN_INTERIOR_EDGES = 22
+TARGET_INTERIOR_EDGES = 28
 
 
 def fitness(G, gen=1, max_gen=MAX_GEN):
     interior_edges = [(u, v) for u, v, d in G.edges(data=True)
                       if d.get('fold_type') != 1]
-    if len(interior_edges) < MIN_INTERIOR_EDGES:
-        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    if (len(interior_edges) < MIN_INTERIOR_EDGES or
+            G.number_of_nodes() < MIN_TOTAL_NODES):
+        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
     gnn  = gnn_score(G)
     kaw  = kawasaki_penalty(G)
     mae  = maekawa_penalty(G)
-    sym  = symmetry_penalty(G)
+    sym  = 0.0
     nov  = novelty_penalty(G, real_graphs)
     comp = complexity_bonus(G)
+    elen = edge_length_penalty(G)
 
     t     = gen / max_gen
-    kaw_w = 0.35 + 0.45 * t   # 0.35 → 0.80
+    kaw_w = 0.60 + 0.40 * t   # 0.60 → 1.00
 
     score = (gnn
-             + 0.20 * comp
+             + 0.50 * comp             # v6b: much stronger complexity reward
              - kaw_w * kaw
              - 0.25 * mae
              - 0.35 * sym
-             - 0.30 * nov)
-    return score, gnn, kaw, mae, sym, nov, comp
+             - 0.30 * nov
+             - 0.20 * elen)            # v6b: softer edge-length penalty
+    return score, gnn, kaw, mae, sym, nov, comp, elen
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Random planar graph seed (fully connected, symmetric, clean border)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def reflect_graph(G, mode=SYMMETRY_MODE):
+    G2 = G.copy()
+    mapping = {}
+
+    max_id = max(G.nodes()) + 1
+
+    # create mirrored nodes
+    for n in list(G.nodes()):
+        x, y = G.nodes[n]['x'], G.nodes[n]['y']
+
+        rx, ry = reflect_point(x, y, mode)
+
+        # skip if lies on symmetry axis
+        if abs(x - rx) < 1e-6 and abs(y - ry) < 1e-6:
+            continue
+
+        new_id = max_id
+        max_id += 1
+
+        G2.add_node(new_id, x=rx, y=ry)
+        mapping[n] = new_id
+
+    # mirror edges
+    for u, v, d in G.edges(data=True):
+        if u in mapping and v in mapping:
+            G2.add_edge(mapping[u], mapping[v], fold_type=d['fold_type'])
+
+    return nx.convert_node_labels_to_integers(G2)
 
 def make_random_planar_graph(scale=SCALE):
     """
@@ -386,7 +726,7 @@ def make_random_planar_graph(scale=SCALE):
 
     # ── Border nodes (symmetric pairs on bottom/top/left-right) ──────────────
     border_coords = []
-    for _ in range(random.randint(2, 6)):
+    for _ in range(random.randint(3, 7)):
         side = random.choice(['bottom', 'top', 'leftright'])
         if side == 'bottom':
             x = random.uniform(-s + 20, -10)
@@ -398,14 +738,26 @@ def make_random_planar_graph(scale=SCALE):
             y = random.uniform(-s + 20, s - 20)
             border_coords += [(-s, y), (s, y)]
 
-    # ── Interior nodes (symmetric pairs) ─────────────────────────────────────
-    n_int  = random.randint(4, 12)
-    int_left = [
-        (random.uniform(-s + margin, -margin),
-         random.uniform(-s + margin, s - margin))
-        for _ in range(n_int)
-    ]
-    interior_coords = int_left + [(-x, y) for x, y in int_left]
+    # ── Interior nodes (well-spread, symmetric pairs) ──────────────────────
+    n_int  = random.randint(8, 14)
+    min_spacing = 32.0  # smaller spacing so seeds can start richer
+    int_half = []
+    for _ in range(n_int * 10):  # oversample then filter for spacing
+        if len(int_half) >= n_int:
+            break
+        # Use FULL interior (including center), not just left strip
+        x = random.uniform(-s + margin, 0)
+        y = random.uniform(-s + margin, s - margin)
+        # Check spacing against existing interior nodes
+        too_close = False
+        for ex, ey in int_half:
+            if math.sqrt((x - ex)**2 + (y - ey)**2) < min_spacing:
+                too_close = True
+                break
+        if not too_close:
+            int_half.append((x, y))
+    # Mirror: (-x, y) gives symmetric right-side partner
+    interior_coords = [(x, y) for x, y in int_half]   # ONLY half
 
     all_coords   = corner_coords + border_coords + interior_coords
     corner_ids   = list(range(4))
@@ -431,6 +783,8 @@ def make_random_planar_graph(scale=SCALE):
 
     def try_add(u, v, ft):
         if G.has_edge(u, v) or _crosses(u, v):
+            return False
+        if not respects_min_incident_angle(G, u, v):
             return False
         G.add_edge(u, v, fold_type=ft)
         placed_segs.append(_line(u, v))
@@ -471,7 +825,7 @@ def make_random_planar_graph(scale=SCALE):
                         key=lambda v: (G.nodes[v]['x'] - ux)**2 +
                                       (G.nodes[v]['y'] - uy)**2)
         placed = 0
-        target = random.randint(2, 5)
+        target = random.randint(3, 4)   # richer seeds without going fully dense
         for v in cands:
             if placed >= target:
                 break
@@ -509,17 +863,68 @@ def make_random_planar_graph(scale=SCALE):
             main = main | comp
 
     G = nx.convert_node_labels_to_integers(G)
-    return recompute_features(G)
+
+    # ── v6: Trim long edges, enforce even degree, Maekawa folds, Kawasaki repair ──
+    trim_long_edges(G)
+    enforce_even_degree(G)
+    assign_folds_maekawa(G)
+    G = recompute_features(G)
+    full_kaw_repair(G, max_passes=2)
+    G = reflect_graph(G)
+    G = recompute_features(G)
+    return G
+
+
+def visualise_initial_population(population, filename="ga_initial_seeds.png"):
+    """Show 6 random seeds from the initial population for debugging."""
+    sample = random.sample(population, min(6, len(population)))
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    for i, G in enumerate(sample):
+        n_e, avg_e, max_e = edge_length_stats(G)
+        kaw = kawasaki_penalty(G)
+        mae = maekawa_penalty(G)
+        m_count = sum(1 for u, v, d in G.edges(data=True) if d.get('fold_type') == 2)
+        v_count = sum(1 for u, v, d in G.edges(data=True) if d.get('fold_type') == 3)
+        visualise(G,
+                  title=(f"Seed {i+1}: N={G.number_of_nodes()} E={n_e} "
+                         f"M={m_count} V={v_count}\n"
+                         f"Kaw={kaw:.3f} Mae={mae:.3f} "
+                         f"avgL={avg_e:.0f} maxL={max_e:.0f}"),
+                  ax=axes.flatten()[i])
+    plt.suptitle("Initial Population Seeds (Debug)", fontsize=13)
+    plt.tight_layout()
+    plt.savefig(f"{BASE}\\{filename}", dpi=150)
+    plt.show()
+    print(f"Saved initial population visualisation to {filename}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mutation
 # ─────────────────────────────────────────────────────────────────────────────
 
+def get_half_graph(G):
+    H = nx.Graph()
+    for n in G.nodes():
+        x, y = G.nodes[n]['x'], G.nodes[n]['y']
+
+        if SYMMETRY_MODE == "vertical" and x <= 0:
+            H.add_node(n, **G.nodes[n])
+        elif SYMMETRY_MODE == "diagonal" and y <= x:
+            H.add_node(n, **G.nodes[n])
+
+    for u, v, d in G.edges(data=True):
+        if u in H.nodes() and v in H.nodes():
+            H.add_edge(u, v, **d)
+
+    return H
+
+
 MUTATION_WEIGHTS = [
-    ('flip_fold',   40),
-    ('move_node',   40),
-    ('add_edge',    15),
-    ('remove_edge',  5),
+    ('flip_fold',   25),
+    ('move_node',   15),
+    ('kaw_repair',  25),
+    ('trim_long',    5),    # v6b: much lower — only trim truly extreme edges
+    ('add_edge',    22),    # v6b: higher — encourage adding structure
+    ('remove_edge',  8),    # v6b: lower — discourage deleting edges
 ]
 _MUT_NAMES, _MUT_W = zip(*MUTATION_WEIGHTS)
 _MUT_CUM = []
@@ -538,6 +943,7 @@ def _choose_mutation():
 
 def mutate(G, gen=1, max_gen=MAX_GEN):
     G    = copy.deepcopy(G)
+    G = get_half_graph(G)   # NEW
     t    = gen / max_gen
     step = 15.0 * (1 - t) + 2.0 * t   # 15 → 2
     lim  = BORDER - 20
@@ -550,6 +956,7 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
     mutable_nodes  = [n for n in nodes if is_mutable(G, n)]
 
     mutation = _choose_mutation()
+    structural_cleanup = False
 
     # Build STRtree once per mutation for speed
     tree, segs, meta = _build_strtree(G)
@@ -589,11 +996,11 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
             G.nodes[node]['x'] = old_x
             G.nodes[node]['y'] = old_y
         else:
-            repair_step = max(2.0, step * 0.5)
+            # v6: analytical repair on moved node and neighbours
             affected = [node] + [nb for nb in G.neighbors(node)
                                   if is_mutable(G, nb)]
             for n in affected:
-                local_kaw_repair(G, n, step=repair_step)
+                analytical_kaw_repair(G, n)
 
             # Mirror move (60 % chance) for symmetry
             if random.random() < 0.6:
@@ -616,29 +1023,65 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
                         G.nodes[mirror_node]['x'] = mox
                         G.nodes[mirror_node]['y'] = moy
                     else:
-                        local_kaw_repair(G, mirror_node, step=repair_step)
+                        analytical_kaw_repair(G, mirror_node)
 
-    # ── add_edge ──────────────────────────────────────────────────────────────
+    # ── kaw_repair (v6) ───────────────────────────────────────────────────────
+    elif mutation == 'kaw_repair':
+        # Pick the node with the WORST Kawasaki violation and fix it
+        worst_node, worst_v = None, 0.0
+        for n in mutable_nodes:
+            v = _kaw_penalty_at(G, n)
+            if v > worst_v:
+                worst_v = v
+                worst_node = n
+        if worst_node is not None and worst_v > 0.01:
+            analytical_kaw_repair(G, worst_node)
+            # Also repair neighbours affected by the move
+            for nb in G.neighbors(worst_node):
+                if is_interior(G, nb) and _kaw_penalty_at(G, nb) > 0.01:
+                    analytical_kaw_repair(G, nb)
+
+    # ── add_edge (only short edges) ────────────────────────────────────────────
     elif mutation == 'add_edge' and len(mutable_nodes) > 2:
         odd  = [n for n in mutable_nodes if G.degree(n) % 2 != 0]
         pool = odd if len(odd) >= 2 else mutable_nodes
         for _ in range(20):
             u, v = random.sample(pool, 2)
+            if _edge_len(G, u, v) > MAX_EDGE_ADD:
+                continue  # don't create long spaghetti edges
+            if not respects_min_incident_angle(G, u, v):
+                continue
             if not G.has_edge(u, v) and not edge_crosses_any(G, u, v, tree, segs, meta):
                 G.add_edge(u, v, fold_type=random.choice([2, 3]))
+                structural_cleanup = True
                 break
 
-    # ── remove_edge ───────────────────────────────────────────────────────────
-    elif mutation == 'remove_edge' and len(interior_edges) > MIN_INTERIOR_EDGES + 4:
-        odd_e = [(u, v, d) for u, v, d in interior_edges
-                 if G.degree(u) % 2 != 0 and G.degree(v) % 2 != 0]
-        pool  = odd_e if odd_e else interior_edges
-        u, v, _ = random.choice(pool)
+    # ── trim_long (only if edge is TRULY extreme and graph has plenty of edges) ─
+    elif mutation == 'trim_long' and len(interior_edges) > MIN_INTERIOR_EDGES + 8:
+        longest = max(interior_edges, key=lambda e: _edge_len(G, e[0], e[1]))
+        u, v, _ = longest
+        if _edge_len(G, u, v) > MAX_EDGE_LEN and G.has_edge(u, v):
+            G.remove_edge(u, v)
+            structural_cleanup = True
+
+    # ── remove_edge (only when graph has MANY edges, prefer long ones) ─────────
+    elif mutation == 'remove_edge' and len(interior_edges) > MIN_INTERIOR_EDGES + 8:
+        by_len = sorted(interior_edges, key=lambda e: _edge_len(G, e[0], e[1]), reverse=True)
+        pick = random.choice(by_len[:min(5, len(by_len))])
+        u, v, _ = pick
         if G.has_edge(u, v):
             G.remove_edge(u, v)
+            structural_cleanup = True
 
     G.remove_nodes_from(list(nx.isolates(G)))
     G = nx.convert_node_labels_to_integers(G)
+    if structural_cleanup:
+        trim_long_edges(G)
+        enforce_even_degree(G)
+        assign_folds_maekawa(G)
+        full_kaw_repair(G, max_passes=2)
+    G = recompute_features(G)
+    G = reflect_graph(G)    # rebuild full symmetric graph
     G = recompute_features(G)
     return G
 
@@ -745,13 +1188,18 @@ def run_ga(population_size=50, generations=MAX_GEN,
         interior = [(u, v) for u, v, d in G.edges(data=True)
                     if d.get('fold_type') != 1]
         attempts = 0
-        while len(interior) < MIN_INTERIOR_EDGES and attempts < 10:
+        while ((len(interior) < MIN_INTERIOR_EDGES or
+                G.number_of_nodes() < MIN_TOTAL_NODES) and
+               attempts < 10):
             G = make_random_planar_graph()
             interior = [(u, v) for u, v, d in G.edges(data=True)
                         if d.get('fold_type') != 1]
             attempts += 1
         population.append(G)
     print(f"Seeded {population_size} random planar graphs")
+
+    # ── Debug: visualise initial seeds ─────────────────────────────────
+    visualise_initial_population(population)
 
     best_scores, mean_scores, kaw_scores, sym_scores, gnn_scores = [], [], [], [], []
     best_ever, best_ever_score = None, -999.0
@@ -761,8 +1209,8 @@ def run_ga(population_size=50, generations=MAX_GEN,
         raw_fits = []
         for G in population:
             result = fitness(G, gen=gen, max_gen=generations)
-            f, gnn, kaw, mae, sym, nov, comp = result
-            scored.append((f, gnn, kaw, mae, sym, nov, comp, G))
+            f, gnn, kaw, mae, sym, nov, comp, elen = result
+            scored.append((f, gnn, kaw, mae, sym, nov, comp, elen, G))
             raw_fits.append(f)
 
         shared        = shared_fitness(population, raw_fits)
@@ -779,19 +1227,25 @@ def run_ga(population_size=50, generations=MAX_GEN,
 
         if top[0] > best_ever_score:
             best_ever_score = top[0]
-            best_ever       = copy.deepcopy(top[7])
+            best_ever       = copy.deepcopy(top[8])  # G is now at index 8
 
         t = gen / generations
         if gen % 5 == 0 or gen == 1:
+            # Diagnostic: edge stats for the best individual
+            n_e, avg_e, max_e = edge_length_stats(top[8])
+            n_nodes = top[8].number_of_nodes()
+            kaw_mean, kaw_max, odd_count, _ = kawasaki_stats(top[8])
             print(f"Gen {gen:03d} | fit={top[0]:.4f} GNN={top[1]:.3f} "
-                  f"Kaw={top[2]:.3f}[w={0.35 + 0.45*t:.2f}] "
+                  f"Kaw={top[2]:.3f}[w={0.60 + 0.40*t:.2f}] "
+                  f"KMean={kaw_mean:.3f} KMax={kaw_max:.3f} Odd={odd_count} "
                   f"Mae={top[3]:.3f} Sym={top[4]:.3f} "
-                  f"Nov={top[5]:.3f} Comp={top[6]:.2f} "
+                  f"ELen={top[7]:.3f} "
+                  f"| N={n_nodes} E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f} "
                   f"| Mean={np.mean(raw_fits):.4f}")
 
         # ── Build next generation ──────────────────────────────────────────
-        new_pop  = [copy.deepcopy(s[7]) for s in scored[:elite_keep]]
-        top_half = [s[1][7] for s in shared_scored[:population_size // 2]]
+        new_pop  = [copy.deepcopy(s[8]) for s in scored[:elite_keep]]
+        top_half = [s[1][8] for s in shared_scored[:population_size // 2]]
 
         while len(new_pop) < population_size:
             parent = random.choice(top_half)
@@ -808,9 +1262,12 @@ def run_ga(population_size=50, generations=MAX_GEN,
             print(f"  [Gen {gen}] Injected {n_inject} fresh random seeds")
 
         # ── Symmetry repair every 10 generations ──────────────────────────
-        if gen % 10 == 0:
+    
+
+        # ── v6: Population-wide Kawasaki repair every 5 generations ───────
+        if gen % 5 == 0:
             for G in new_pop:
-                repair_symmetry(G)
+                full_kaw_repair(G, max_passes=1)
 
         population = new_pop
 
@@ -831,17 +1288,19 @@ def run_ga(population_size=50, generations=MAX_GEN,
     plt.show()
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
-    final_pop  = [s[7] for s in scored]
+    final_pop  = [s[8] for s in scored]
     final_fits = [s[0] for s in scored]
     diverse6   = select_diverse_top(final_pop, final_fits, k=6)
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, G in enumerate(diverse6):
-        f, gnn, kaw, mae, sym, nov, comp = fitness(
+        f, gnn, kaw, mae, sym, nov, comp, elen = fitness(
             G, gen=generations, max_gen=generations)
+        n_e, avg_e, max_e = edge_length_stats(G)
         visualise(G,
                   title=(f"Rank {i+1} fit={f:.3f} GNN={gnn:.3f} "
-                         f"Kaw={kaw:.3f} Sym={sym:.3f} Comp={comp:.2f}"),
+                         f"Kaw={kaw:.3f} Mae={mae:.3f}\n"
+                         f"N={G.number_of_nodes()} E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f}"),
                   ax=axes.flatten()[i])
     plt.suptitle("Top 6 Generated Crease Patterns (Diverse)", fontsize=13)
     plt.tight_layout()
@@ -852,13 +1311,16 @@ def run_ga(population_size=50, generations=MAX_GEN,
         pickle.dump(best_ever, f)
     with open(f"{BASE}\\diverse_top6.pkl", 'wb') as f:
         pickle.dump(diverse6, f)
-    print("Saved best_generated.pkl + diverse_top6.pkl")
+    write_cp_file(best_ever, f"{BASE}\\best_generated.cp")
+    write_cp_collection(diverse6, f"{BASE}\\diverse_top6_cp", prefix="rank")
+    print("Saved best_generated.pkl + diverse_top6.pkl + editable .cp exports")
     return best_ever, scored, diverse6
 
 
-best, results, diverse = run_ga(
-    population_size=50,
-    generations=80,
-    elite_keep=10,
-    mutations_per=3,
-)
+if __name__ == "__main__":
+    best, results, diverse = run_ga(
+        population_size=50,
+        generations=80,
+        elite_keep=10,
+        mutations_per=3,
+    )
