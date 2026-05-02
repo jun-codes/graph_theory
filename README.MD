@@ -154,4 +154,22 @@ Z3 Maekawa Repair Experiment:
 
 Conclusion: Z3 works when topology is Maekawa-satisfiable, but the current generator/mutations produce too many odd non-border vertex degrees. The next required change is topology repair or topology-aware mutation: enforce even non-border degree at interior vertices before Z3 label solving.
 
+Even-Degree Topology Repair Experiment:
+
+- Repair utility: topology_even_repair.py
+- Script: Genetic_Algo_Line_Filtered_Repaired_Z3_Topology.py
+- Method: before Z3, repair true interior non-border degree parity by removing safe odd-odd creases and odd interior-to-boundary creases. Boundary vertices are excluded from Maekawa constraints.
+- Existing output smoke check:
+  - line_z3_best_generated.pkl: topology bad vertices 12 -> 0, Z3 SAT, interior Maekawa 2.0000 -> 0.0000
+  - line_z3_diverse_top6.pkl: every top-6 candidate became Z3 SAT after topology repair
+- GA smoke settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
+- GA result:
+  - Initial topology repairs: 16 repaired, 14 partial
+  - Initial Z3 repairs: 16 SAT, 14 topology_unsat
+  - By generation 20: 53/54 repair attempts were Z3 SAT
+  - line_topology_z3_best_generated.pkl: line-GNN predicted valid, valid probability 0.9246, mean Kawasaki 1.0385, exact interior Maekawa 0.0000
+  - line_topology_z3_diverse_top6.pkl: all six line-GNN predicted valid, valid probability range 0.8256-0.9472, exact interior Maekawa 0.0000
+
+Note: LineGraph_Tester.py still prints the classifier-feature Maekawa summary, which includes boundary vertices because the line-GNN checkpoint was trained with those features. The exact Z3/interior Maekawa check for the topology-repaired outputs is 0.0000.
+
 

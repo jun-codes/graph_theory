@@ -23,6 +23,7 @@ from z3 import Bool, If, Optimize, Or, Sum, is_true, sat
 
 
 EdgeKey = Tuple[int, int]
+BOUNDARY_TOL = 3.0
 
 
 @dataclass
@@ -40,7 +41,32 @@ def _edge_key(u: int, v: int) -> EdgeKey:
     return (u, v) if u <= v else (v, u)
 
 
+def _bbox(G: nx.Graph) -> Tuple[float, float, float, float]:
+    xs = [float(G.nodes[n]["x"]) for n in G.nodes()]
+    ys = [float(G.nodes[n]["y"]) for n in G.nodes()]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def _is_boundary_node(
+    G: nx.Graph,
+    node: int,
+    bbox: Tuple[float, float, float, float],
+    tol: float = BOUNDARY_TOL,
+) -> bool:
+    x = float(G.nodes[node]["x"])
+    y = float(G.nodes[node]["y"])
+    min_x, max_x, min_y, max_y = bbox
+    return (
+        abs(x - min_x) <= tol
+        or abs(x - max_x) <= tol
+        or abs(y - min_y) <= tol
+        or abs(y - max_y) <= tol
+    )
+
+
 def _is_interior_vertex(G: nx.Graph, node: int) -> bool:
+    if _is_boundary_node(G, node, _bbox(G)):
+        return False
     neighbors = list(G.neighbors(node))
     return len(neighbors) >= 2 and not all(
         G[node][nb].get("fold_type") == 1 for nb in neighbors
@@ -48,6 +74,8 @@ def _is_interior_vertex(G: nx.Graph, node: int) -> bool:
 
 
 def _mae_at(G: nx.Graph, node: int) -> float:
+    if _is_boundary_node(G, node, _bbox(G)):
+        return 0.0
     neighbors = list(G.neighbors(node))
     if len(neighbors) < 2:
         return 0.0
