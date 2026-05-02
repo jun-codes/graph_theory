@@ -137,4 +137,21 @@ Gradient Geometry Repair Experiment:
 
 The gradient repair successfully lowers Kawasaki for selected candidates and can improve symmetry, but it cannot fix Maekawa because Maekawa depends on discrete mountain/valley counts, not coordinates. The next repair step should be a discrete fold-assignment repair for Maekawa, paired with the gradient Kawasaki/symmetry repair.
 
+Z3 Maekawa Repair Experiment:
+
+- Repair utility: maekawa_z3_repair.py
+- Script: Genetic_Algo_Line_Filtered_Repaired_Z3.py
+- Method: one Z3 Boolean per non-border crease, with True=mountain and False=valley. Each interior vertex enforces Maekawa by requiring mountain count d/2-1 or d/2+1. The optimizer minimizes changed fold labels.
+- Existing repaired-output smoke check:
+  - line_repaired_best_generated.pkl: SAT, changed 6 creases, Maekawa 2.0000 -> 0.0000
+  - line_repaired_diverse_top6.pkl: 3/6 SAT; topology-unsat cases had odd non-border vertex degrees
+- GA smoke settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
+- GA result:
+  - Initial Z3 repairs: 30/30 topology_unsat
+  - Every generation stayed topology_unsat, so Z3 could not perform exact Maekawa repair by labels alone
+  - line_z3_best_generated.pkl: predicted invalid, valid probability 0.0000, mean Kawasaki 0.9821, mean Maekawa 1.1429
+  - line_z3_diverse_top6.pkl: all six predicted invalid, mean Kawasaki 0.7881, mean Maekawa 1.2549
+
+Conclusion: Z3 works when topology is Maekawa-satisfiable, but the current generator/mutations produce too many odd non-border vertex degrees. The next required change is topology repair or topology-aware mutation: enforce even non-border degree at interior vertices before Z3 label solving.
+
 
