@@ -16,6 +16,11 @@ Core Training and Evaluation:
 - GNN_Classifier.py: Trains a Graph Isomorphism Network on labeled graph data. Uses 3 GIN layers with MLPs, global pooling, and a classifier head. Saves the best model to best_model.pt during training.
 - data_split.py: Loads positive examples (valid CPs) and negative examples (corrupted patterns), converts them to PyTorch Geometric format, and creates train/validation/test splits (80/10/10). Outputs to train.pt, val.pt, test.pt.
 - tester.py: Evaluates the trained model on new crease pattern files (both .cp text format and .png images). Extracts edges, builds node-edge graphs, and predicts validity.
+- LineGraph_Classifier.py: Trains a separate crease-line graph classifier. Each crease becomes a node in a line graph, and line-graph edges describe creases that meet at the same CP vertex.
+- line_graph_features.py: Converts NetworkX CP graphs into line-graph features with crease-level node features and crease-adjacency edge features.
+- line_graph_scoring.py: Loads line_best_model.pt and provides reusable line-GNN scoring utilities.
+- LineGraph_Tester.py: Evaluates .pkl graph artifacts or .cp files with the line-GNN, plus Kawasaki and Maekawa summaries.
+- line_graph_ga_filter.py: Optional helper for penalizing GA candidates that the line-GNN classifies as invalid. It is not wired into Genetic_Algo.py by default.
 
 Generation:
 - Genetic_Algo.py: Evolves crease patterns using the trained GNN as a fitness function. Computes Kawasaki and Maekawa penalties (folding constraints), mutates graphs, and selects high-scoring candidates.
@@ -36,6 +41,8 @@ Graph Representation: Each crease pattern is stored as a NetworkX graph with:
   - Graph label: 1 for valid CPs, 0 for corrupted/invalid
 
 Neural Network Architecture: A 3-layer GIN with 64 hidden units, batch normalization, MLPs on edges, and global mean/max pooling. Output is a 2-class classifier (valid or invalid).
+
+Line-Graph Classifier: A separate GINE classifier treats creases as graph nodes. It uses 25 crease-node features and 10 crease-adjacency edge features, including fold type, line geometry, shared-vertex angle, cyclic adjacency, endpoint degree parity, and local Kawasaki/Maekawa residuals. The current checkpoint is line_best_model.pt.
 
 Genetic Algorithm: Maintains a population of crease patterns, evaluates fitness using the GNN, applies mutations, and selects candidates with lowest Kawasaki/Maekawa penalties.
 
@@ -61,15 +68,37 @@ Workflow:
    python tester.py <path_to_cp_or_png_file>
    (Predicts if the pattern is a valid crease pattern)
 
-5. Compare patterns:
+5. Train the line-graph classifier:
+   python LineGraph_Classifier.py
+   (Saves line_best_model.pt)
+
+6. Evaluate line-graph classifier artifacts:
+   python LineGraph_Tester.py
+   (Evaluates graphs.pkl, negatives.pkl, negatives_v3.pkl, best_generated.pkl, and diverse_top6.pkl)
+
+7. Compare patterns:
    python similarity.py
    (Computes similarity between generated and real CPs)
 
-6. Visualize and analyze:
+8. Visualize and analyze:
    python comparison.py
    (Histogram distributions of graph statistics)
    python visualiser.py
    (Plot an example from the dataset)
 
+Recent Line-Graph Results:
+
+- Full line-GNN test accuracy after 10 epochs: 0.9762
+- Held-out confusion matrix, rows=true [invalid, valid], cols=pred [invalid, valid]: [[66, 0], [3, 57]]
+- Full artifact evaluation:
+  - graphs.pkl: 607/626 predicted valid
+  - negatives.pkl: 625/626 predicted invalid
+  - negatives_v3.pkl: 612/626 predicted invalid
+  - best_generated.pkl: predicted invalid, valid probability about 0.0001
+  - diverse_top6.pkl: all six predicted invalid
+
+Current Direction:
+
+The line-GNN is useful as a conservative filter for generated crease patterns. The next experiment is to copy Genetic_Algo.py into a separate line-filtered GA script and subtract a line-GNN penalty from candidate fitness without changing the original GA.
 
 
