@@ -11,3 +11,5 @@ runs/**/*.err.log
 runs/*/failed_*.log
 runs/*/startprocess_probe.log
 runs/*/startprocess_probe.err.log
+streamlit_app.log
+streamlit_app.err.log
