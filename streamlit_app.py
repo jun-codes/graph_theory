@@ -89,7 +89,7 @@ def run_algorithm(
     start = time.perf_counter()
 
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-        module = importlib.import_module("Genetic_Algo_Z3_Topology_Symmetry_Kawasaki")
+        module = importlib.import_module("Genetic Origami Generation")
         module.BASE = str(ROOT)
         module.USE_SYMMETRY = True
         module.SYMMETRY_MODE = symmetry_mode
