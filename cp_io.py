@@ -69,3 +69,33 @@ def write_cp_collection(graphs, directory, prefix="pattern", decimals=6, clip_bo
         write_cp_file(G, path, decimals=decimals, clip_box=clip_box)
         paths.append(path)
     return paths
+
+if __name__ == "__main__":
+    import pickle
+
+    pkl_path = input("enter .pkl file path: ").strip()
+    out_dir = input("enter output directory: ").strip()
+    prefix = input("enter filename prefix (default=pattern): ").strip() or "pattern"
+
+    with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+
+    # handle common cases
+    if isinstance(data, list):
+        graphs = data
+    elif isinstance(data, dict):
+        # try common keys
+        for key in ["graphs", "best", "population"]:
+            if key in data:
+                graphs = data[key]
+                break
+        else:
+            raise ValueError("couldn't find graphs in dict")
+    else:
+        graphs = [data]
+
+    paths = write_cp_collection(graphs, out_dir, prefix=prefix)
+
+    print("written files:")
+    for p in paths:
+        print(p)

@@ -942,7 +942,9 @@ def kawasaki_penalty(G):
     if n_interior == 0:
         return 0.0
     odd_frac = odd_count / n_interior
-    return mean_v + 0.35 * max_v + 0.50 * odd_frac
+    max_excess = max(0.0, max_v - KAW_MAX_TARGET)
+    mean_excess = max(0.0, mean_v - KAW_MEAN_TARGET)
+    return mean_v + 0.85 * max_v + 1.70 * max_excess + 0.80 * mean_excess + 0.75 * odd_frac
 
 
 def maekawa_penalty(G):
@@ -1101,17 +1103,27 @@ TARGET_TOTAL_NODES = 54
 SEED_MIN_INTERIOR_EDGES = 28
 MIN_INTERIOR_EDGES = 42
 TARGET_INTERIOR_EDGES = 66
+KAW_MAX_TARGET = 0.045
+KAW_MEAN_TARGET = 0.018
+CLUMP_REJECT_THRESHOLD = 0.38
+
+
+def projection_steps_for_gen(gen, max_gen):
+    t = gen / max(1, max_gen)
+    return int(22 + 26 * t)
 
 
 def fitness(G, gen=1, max_gen=MAX_GEN):
     interior_edges = interior_crease_edges(G)
-    _, _, odd_count, _ = kawasaki_stats(G)
+    kaw_mean, kaw_max, odd_count, n_interior = kawasaki_stats(G)
     topo_bad = topology_bad_count(G)
+    clump = clump_penalty(G)
     if (len(interior_edges) < MIN_INTERIOR_EDGES or
             G.number_of_nodes() < MIN_TOTAL_NODES or
             odd_count > 0 or
-            topo_bad > 0):
-        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0
+            topo_bad > 0 or
+            clump > CLUMP_REJECT_THRESHOLD):
+        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, clump, 2.0, kaw_max
 
     gnn  = gnn_score(G)
     kaw  = kawasaki_penalty(G)
@@ -1120,30 +1132,38 @@ def fitness(G, gen=1, max_gen=MAX_GEN):
     nov  = novelty_penalty(G, real_graphs)
     comp = complexity_bonus(G)
     elen = edge_length_penalty(G)
-    clump = clump_penalty(G)
     line_prob = line_filter.valid_probability(G)
     line_pen = line_filter.penalty(G)
-    z3_pen = 0.0 if G.graph.get('z3_status', 'missing') in ('sat', 'skipped') else 1.25
+    z3_status = G.graph.get('z3_status', 'missing')
+    z3_pen = 0.0 if z3_status in (
+        'sat', 'skipped', 'missing', 'unavailable', 'not_run'
+    ) else 1.25
     topology_pen = 0.0 if G.graph.get('topology_status', 'missing') in ('repaired', 'skipped') else 1.25
 
     t     = gen / max_gen
-    kaw_w = 0.75 + 0.65 * t
-    if kaw < 0.08 and odd_count == 0 and topo_bad == 0:
-        kaw_w *= 0.45
+    kaw_w = 0.95 + 0.85 * t
+    kmax_w = 1.25 + 1.35 * t
+    if kaw_max < KAW_MAX_TARGET and kaw_mean < KAW_MEAN_TARGET:
+        kaw_w *= 0.55
+        kmax_w *= 0.65
+    kmax_excess = max(0.0, kaw_max - KAW_MAX_TARGET)
+    kmean_excess = max(0.0, kaw_mean - KAW_MEAN_TARGET)
 
     score = (gnn
              + 0.80 * line_prob
-             + 0.55 * comp
+             + 0.42 * comp
              - kaw_w * kaw
+             - kmax_w * kmax_excess
+             - 0.85 * kmean_excess
              - 0.35 * mae
              - 0.35 * sym
              - 0.30 * nov
              - 0.20 * elen
-             - 0.55 * clump
+             - 1.10 * clump
              - 0.70 * line_pen
              - z3_pen
              - topology_pen)
-    return score, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen
+    return score, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen, kaw_max
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Random planar graph seed (fully connected, symmetric, clean border)
@@ -1510,14 +1530,22 @@ def get_half_graph(G):
     return H
 
 
-def repair_symmetric_candidate(G, *, kaw_passes=1, kaw_steps=35):
+def repair_symmetric_candidate(
+    G, *, kaw_passes=1, kaw_steps=35, solve_maekawa=False
+):
     if not USE_SYMMETRY:
         repair_candidate_constraints(
-            G, trim_edges=True, kaw_passes=kaw_passes, kaw_steps=kaw_steps)
+            G,
+            trim_edges=True,
+            kaw_passes=kaw_passes,
+            kaw_steps=kaw_steps,
+            solve_maekawa=solve_maekawa,
+        )
         rebuild_square_border(G)
         remove_crossing_edges(G, max_rounds=3)
         rebuild_square_border(G)
-        apply_discrete_flatfold_repairs(G, density=True)
+        apply_discrete_flatfold_repairs(
+            G, density=True, solve_maekawa=solve_maekawa)
         recompute_features(G)
         return G
 
@@ -1529,6 +1557,7 @@ def repair_symmetric_candidate(G, *, kaw_passes=1, kaw_steps=35):
         kaw_steps=kaw_steps,
         density=True,
         target_edges=SEED_MIN_INTERIOR_EDGES,
+        solve_maekawa=solve_maekawa,
     )
     repaired = reflect_graph(H)
     repair_candidate_constraints(
@@ -1537,11 +1566,99 @@ def repair_symmetric_candidate(G, *, kaw_passes=1, kaw_steps=35):
         kaw_passes=0,
         kaw_steps=0,
         density=False,
-        solve_maekawa=True,
+        solve_maekawa=solve_maekawa,
     )
     _overwrite_graph(G, repaired)
     recompute_features(G)
     return G
+
+
+def _projection_objective(kmean, kmax, odd, topo, clump):
+    return (
+        kmean
+        + 2.2 * max(0.0, kmax - KAW_MAX_TARGET)
+        + 0.8 * kmax
+        + 2.5 * odd
+        + 2.5 * topo
+        + 0.75 * clump
+    )
+
+
+def project_candidate(G, *, gen=1, max_gen=MAX_GEN, label="candidate"):
+    """Lightly project each candidate back toward topology + Kawasaki validity."""
+    original = copy.deepcopy(G)
+    before_mean, before_max, before_odd, _ = kawasaki_stats(G)
+    before_topo = topology_bad_count(G)
+    before_clump = clump_penalty(G)
+    before_obj = _projection_objective(
+        before_mean, before_max, before_odd, before_topo, before_clump)
+    steps = projection_steps_for_gen(gen, max_gen)
+    passes = 2 if before_max > 0.18 else 1
+
+    repair_symmetric_candidate(
+        G, kaw_passes=passes, kaw_steps=steps, solve_maekawa=False)
+    apply_discrete_flatfold_repairs(G, density=False, solve_maekawa=False)
+    recompute_features(G)
+
+    after_mean, after_max, after_odd, _ = kawasaki_stats(G)
+    after_topo = topology_bad_count(G)
+    after_clump = clump_penalty(G)
+    after_obj = _projection_objective(
+        after_mean, after_max, after_odd, after_topo, after_clump)
+    reverted = False
+    if after_obj > before_obj + 1e-6 and before_topo == 0 and before_odd == 0:
+        _overwrite_graph(G, original)
+        recompute_features(G)
+        after_mean, after_max, after_odd, _ = kawasaki_stats(G)
+        after_topo = topology_bad_count(G)
+        after_clump = clump_penalty(G)
+        reverted = True
+
+    improved = (
+        after_max < before_max - 1e-6 or
+        after_mean < before_mean - 1e-6 or
+        after_odd < before_odd or
+        after_topo < before_topo
+    )
+    return {
+        "label": label,
+        "improved": improved,
+        "before_mean": before_mean,
+        "before_max": before_max,
+        "before_odd": before_odd,
+        "before_topo": before_topo,
+        "before_clump": before_clump,
+        "after_mean": after_mean,
+        "after_max": after_max,
+        "after_odd": after_odd,
+        "after_topo": after_topo,
+        "after_clump": after_clump,
+        "reverted": reverted,
+        "z3": G.graph.get("z3_status", "missing"),
+    }
+
+
+def summarize_projection_stats(stats, prefix):
+    if not stats:
+        print(f"{prefix}: no projection stats", flush=True)
+        return
+    improved = sum(1 for s in stats if s["improved"])
+    reverted = sum(1 for s in stats if s.get("reverted"))
+    z3_counts = {}
+    for s in stats:
+        z3_counts[s["z3"]] = z3_counts.get(s["z3"], 0) + 1
+    print(
+        f"{prefix}: improved={improved}/{len(stats)} "
+        f"reverted={reverted} "
+        f"KMax {np.mean([s['before_max'] for s in stats]):.3f}->"
+        f"{np.mean([s['after_max'] for s in stats]):.3f} "
+        f"KMean {np.mean([s['before_mean'] for s in stats]):.3f}->"
+        f"{np.mean([s['after_mean'] for s in stats]):.3f} "
+        f"Clump {np.mean([s['before_clump'] for s in stats]):.3f}->"
+        f"{np.mean([s['after_clump'] for s in stats]):.3f} "
+        f"Z3={z3_counts}",
+        flush=True,
+    )
 
 
 LEGACY_MUTATION_WEIGHTS = [
@@ -1701,6 +1818,7 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
             kaw_steps=24,
             density=True,
             target_edges=SEED_MIN_INTERIOR_EDGES if USE_SYMMETRY else MIN_INTERIOR_EDGES,
+            solve_maekawa=False,
         )
     G = recompute_features(G)
     G = reflect_graph(G)    # rebuild full symmetric graph
@@ -1710,7 +1828,7 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
         kaw_passes=0,
         kaw_steps=0,
         density=not USE_SYMMETRY,
-        solve_maekawa=True,
+        solve_maekawa=False,
     )
     G = recompute_features(G)
     return G
@@ -1783,6 +1901,38 @@ def select_diverse_top(population, fitnesses, k=6, min_d=0.15):
                 break
     return selected
 
+
+def finalize_candidate_for_export(G, label):
+    print(f"Final projection for {label}...", flush=True)
+    for pass_idx, (kaw_passes, kaw_steps) in enumerate(((2, 60), (2, 90)), start=1):
+        before_mean, before_max, before_odd, _ = kawasaki_stats(G)
+        before_mae = maekawa_penalty(G)
+        before_topo = topology_bad_count(G)
+
+        repair_symmetric_candidate(
+            G,
+            kaw_passes=kaw_passes,
+            kaw_steps=kaw_steps,
+            solve_maekawa=False,
+        )
+        apply_discrete_flatfold_repairs(G, density=False, solve_maekawa=True)
+        recompute_features(G)
+
+        after_mean, after_max, after_odd, _ = kawasaki_stats(G)
+        after_mae = maekawa_penalty(G)
+        after_topo = topology_bad_count(G)
+        print(
+            f"  {label} pass {pass_idx}: "
+            f"KMean {before_mean:.4f}->{after_mean:.4f} "
+            f"KMax {before_max:.4f}->{after_max:.4f} "
+            f"Odd {before_odd}->{after_odd} "
+            f"TopoBad {before_topo}->{after_topo} "
+            f"Mae {before_mae:.4f}->{after_mae:.4f} "
+            f"Z3={G.graph.get('z3_status', 'missing')}",
+            flush=True,
+        )
+    return G
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Visualisation
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1816,8 +1966,11 @@ def run_ga(population_size=30, generations=MAX_GEN,
 
     # ── Build initial population from scratch ─────────────────────────────────
     population = []
+    seed_projection_stats = []
     for idx in range(population_size):
         G = make_random_planar_graph()
+        seed_projection_stats.append(project_candidate(
+            G, gen=1, max_gen=generations, label=f"seed-{idx + 1}"))
         # Guarantee seed meets minimum interior edge count
         interior = [(u, v) for u, v, d in G.edges(data=True)
                     if d.get('fold_type') != 1]
@@ -1830,6 +1983,8 @@ def run_ga(population_size=30, generations=MAX_GEN,
                 topo_bad > 0) and
                attempts < 10):
             G = make_random_planar_graph()
+            seed_projection_stats[-1] = project_candidate(
+                G, gen=1, max_gen=generations, label=f"seed-{idx + 1}-retry")
             interior = [(u, v) for u, v, d in G.edges(data=True)
                         if d.get('fold_type') != 1]
             _, _, odd_count, _ = kawasaki_stats(G)
@@ -1839,12 +1994,13 @@ def run_ga(population_size=30, generations=MAX_GEN,
         if (idx + 1) % 5 == 0 or idx == 0 or idx + 1 == population_size:
             print(f"  Seeded {idx + 1}/{population_size}", flush=True)
     print(f"Seeded {population_size} random planar graphs")
+    summarize_projection_stats(seed_projection_stats, "Initial projection")
 
     # ── Debug: visualise initial seeds ─────────────────────────────────
     visualise_initial_population(population)
 
     best_scores, mean_scores = [], []
-    kaw_scores, sym_scores, gnn_scores = [], [], []
+    kaw_scores, kmax_scores, sym_scores, gnn_scores = [], [], [], []
     line_scores, clump_scores = [], []
     best_ever, best_ever_score = None, -999.0
 
@@ -1853,10 +2009,10 @@ def run_ga(population_size=30, generations=MAX_GEN,
         raw_fits = []
         for G in population:
             result = fitness(G, gen=gen, max_gen=generations)
-            f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen = result
+            f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen, kmax = result
             scored.append((
                 f, gnn, kaw, mae, sym, nov, comp, elen,
-                line_prob, clump, line_pen, G,
+                line_prob, clump, line_pen, kmax, G,
             ))
             raw_fits.append(f)
 
@@ -1869,6 +2025,7 @@ def run_ga(population_size=30, generations=MAX_GEN,
         best_scores.append(top[0])
         mean_scores.append(float(np.mean(raw_fits)))
         kaw_scores.append(top[2])
+        kmax_scores.append(top[11])
         sym_scores.append(top[4])
         gnn_scores.append(top[1])
         line_scores.append(top[8])
@@ -1876,20 +2033,22 @@ def run_ga(population_size=30, generations=MAX_GEN,
 
         if top[0] > best_ever_score:
             best_ever_score = top[0]
-            best_ever       = copy.deepcopy(top[11])
+            best_ever       = copy.deepcopy(top[12])
 
         t = gen / generations
         if gen % 5 == 0 or gen == 1:
             # Diagnostic: edge stats for the best individual
-            n_e, avg_e, max_e = edge_length_stats(top[11])
-            n_nodes = top[11].number_of_nodes()
-            kaw_mean, kaw_max, odd_count, _ = kawasaki_stats(top[11])
-            topo_bad = topology_bad_count(top[11])
-            kaw_w = 0.75 + 0.65 * t
-            if top[2] < 0.08 and odd_count == 0 and topo_bad == 0:
-                kaw_w *= 0.45
+            n_e, avg_e, max_e = edge_length_stats(top[12])
+            n_nodes = top[12].number_of_nodes()
+            kaw_mean, kaw_max, odd_count, _ = kawasaki_stats(top[12])
+            topo_bad = topology_bad_count(top[12])
+            kaw_w = 0.95 + 0.85 * t
+            kmax_w = 1.25 + 1.35 * t
+            if kaw_max < KAW_MAX_TARGET and kaw_mean < KAW_MEAN_TARGET:
+                kaw_w *= 0.55
+                kmax_w *= 0.65
             print(f"Gen {gen:03d} | fit={top[0]:.4f} GNN={top[1]:.3f} "
-                  f"Line={top[8]:.3f} Kaw={top[2]:.3f}[w={kaw_w:.2f}] "
+                  f"Line={top[8]:.3f} Kaw={top[2]:.3f}[w={kaw_w:.2f}/{kmax_w:.2f}] "
                   f"KMean={kaw_mean:.3f} KMax={kaw_max:.3f} "
                   f"Odd={odd_count} TopoBad={topo_bad} "
                   f"Mae={top[3]:.3f} Sym={top[4]:.3f} "
@@ -1898,21 +2057,27 @@ def run_ga(population_size=30, generations=MAX_GEN,
                   f"| Mean={np.mean(raw_fits):.4f}")
 
         # ── Build next generation ──────────────────────────────────────────
-        new_pop  = [copy.deepcopy(s[11]) for s in scored[:elite_keep]]
-        top_half = [s[1][11] for s in shared_scored[:population_size // 2]]
+        new_pop  = [copy.deepcopy(s[12]) for s in scored[:elite_keep]]
+        top_half = [s[1][12] for s in shared_scored[:population_size // 2]]
 
+        projection_stats = []
         while len(new_pop) < population_size:
             parent = random.choice(top_half)
             child  = copy.deepcopy(parent)
             for _ in range(mutations_per):
                 child = mutate(child, gen=gen, max_gen=generations)
+            projection_stats.append(project_candidate(
+                child, gen=gen, max_gen=generations, label=f"gen-{gen}-child"))
             new_pop.append(child)
 
         # ── Inject fresh diversity every 20 generations (10 % of pop) ─────
         if gen % 20 == 0:
             n_inject = max(2, population_size // 10)
             for i in range(n_inject):
-                new_pop[-(i + 1)] = make_random_planar_graph()
+                injected = make_random_planar_graph()
+                projection_stats.append(project_candidate(
+                    injected, gen=gen, max_gen=generations, label=f"gen-{gen}-inject"))
+                new_pop[-(i + 1)] = injected
             print(f"  [Gen {gen}] Injected {n_inject} fresh random seeds")
 
         # ── Symmetry repair every 10 generations ──────────────────────────
@@ -1920,8 +2085,14 @@ def run_ga(population_size=30, generations=MAX_GEN,
 
         # ── v6: Population-wide Kawasaki repair every 5 generations ───────
         if gen >= 10 and gen % 10 == 0:
+            elite_projection_stats = []
             for G in new_pop[:elite_keep]:
-                repair_symmetric_candidate(G, kaw_passes=1, kaw_steps=40)
+                elite_projection_stats.append(project_candidate(
+                    G, gen=gen, max_gen=generations, label=f"gen-{gen}-elite"))
+            summarize_projection_stats(
+                elite_projection_stats, f"  Elite projection gen {gen}")
+
+        summarize_projection_stats(projection_stats, f"  Child projection gen {gen}")
 
         population = new_pop
 
@@ -1935,7 +2106,9 @@ def run_ga(population_size=30, generations=MAX_GEN,
     axes[0, 1].plot(gnn_scores, 'purple', label='node GNN')
     axes[0, 1].plot(line_scores, 'black', linestyle='--', label='line GNN')
     axes[0, 1].set_title('Classifier Scores (best)'); axes[0, 1].legend()
-    axes[1, 0].plot(kaw_scores, 'r');      axes[1, 0].set_title('Kawasaki (best)')
+    axes[1, 0].plot(kaw_scores, 'r', label='kaw score')
+    axes[1, 0].plot(kmax_scores, 'darkred', linestyle='--', label='KMax')
+    axes[1, 0].set_title('Kawasaki (best)'); axes[1, 0].legend()
     axes[1, 1].plot(sym_scores, 'g', label='symmetry')
     axes[1, 1].plot(clump_scores, 'brown', linestyle='--', label='clump')
     axes[1, 1].set_title('Shape Penalties (best)'); axes[1, 1].legend()
@@ -1946,18 +2119,25 @@ def run_ga(population_size=30, generations=MAX_GEN,
     plt.show()
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
-    final_pop  = [s[11] for s in scored]
+    final_pop  = [s[12] for s in scored]
     final_fits = [s[0] for s in scored]
     diverse6   = select_diverse_top(final_pop, final_fits, k=6)
 
+    best_ever = finalize_candidate_for_export(best_ever, "best")
+    diverse6 = [
+        finalize_candidate_for_export(G, f"rank {i}")
+        for i, G in enumerate(diverse6, start=1)
+    ]
+
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, G in enumerate(diverse6):
-        f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen = fitness(
+        f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen, kmax = fitness(
             G, gen=generations, max_gen=generations)
         n_e, avg_e, max_e = edge_length_stats(G)
         visualise(G,
                   title=(f"Rank {i+1} fit={f:.3f} GNN={gnn:.3f} "
-                         f"Line={line_prob:.3f} Kaw={kaw:.3f} Mae={mae:.3f}\n"
+                         f"Line={line_prob:.3f} Kaw={kaw:.3f} KMax={kmax:.3f} "
+                         f"Mae={mae:.3f}\n"
                          f"Clump={clump:.3f} N={G.number_of_nodes()} "
                          f"E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f}"),
                   ax=axes.flatten()[i])
