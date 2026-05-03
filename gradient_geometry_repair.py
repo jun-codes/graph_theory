@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import copy
 import math
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import networkx as nx
 import numpy as np
@@ -99,6 +99,12 @@ def kawasaki_mean(G: nx.Graph) -> float:
     return float(np.mean(nonzero)) if nonzero else 0.0
 
 
+def kawasaki_mean_for_nodes(G: nx.Graph, nodes: Iterable[int]) -> float:
+    values = [kawasaki_at(G, n) for n in nodes if n in G]
+    nonzero = [v for v in values if v > 0]
+    return float(np.mean(nonzero)) if nonzero else 0.0
+
+
 def symmetry_error(G: nx.Graph, border: float = BORDER, tol: float = BOUNDARY_TOL) -> float:
     mutable = [n for n in G.nodes() if not is_boundary_node(G, n, border, tol)]
     if len(mutable) < 2:
@@ -149,6 +155,26 @@ def _neighbor_order_specs(G: nx.Graph, node_to_idx: Dict[int, int]):
     return specs
 
 
+def _neighbor_order_specs_for_nodes(
+    G: nx.Graph,
+    node_to_idx: Dict[int, int],
+    nodes: Iterable[int],
+):
+    target = set(nodes)
+    specs = []
+    for node in target:
+        if node not in G or not is_interior_vertex(G, node):
+            continue
+        cx, cy = _coords(G, node)
+        ordered = sorted(
+            list(G.neighbors(node)),
+            key=lambda nb: math.atan2(_coords(G, nb)[1] - cy, _coords(G, nb)[0] - cx),
+        )
+        if len(ordered) >= 2:
+            specs.append((node_to_idx[node], [node_to_idx[nb] for nb in ordered]))
+    return specs
+
+
 def _symmetry_pairs(
     G: nx.Graph,
     nodes: List[int],
@@ -183,6 +209,19 @@ def _edge_index_pairs(G: nx.Graph, node_to_idx: Dict[int, int]) -> List[Tuple[in
     return [(node_to_idx[u], node_to_idx[v]) for u, v in G.edges()]
 
 
+def _edge_index_pairs_for_nodes(
+    G: nx.Graph,
+    node_to_idx: Dict[int, int],
+    focus_nodes: Iterable[int],
+) -> List[Tuple[int, int]]:
+    focus = set(focus_nodes)
+    pairs = []
+    for u, v in G.edges():
+        if u in focus or v in focus:
+            pairs.append((node_to_idx[u], node_to_idx[v]))
+    return pairs
+
+
 def _torch_loss(
     coords: torch.Tensor,
     original: torch.Tensor,
@@ -195,6 +234,10 @@ def _torch_loss(
     move_weight: float,
     min_edge_length: float,
     scale: float,
+    min_angle_gap: float = 0.0,
+    angle_gap_weight: float = 0.0,
+    worst_weight: float = 0.0,
+    logsumexp_tau: float = 0.25,
 ) -> torch.Tensor:
     device = coords.device
     dtype = coords.dtype
@@ -202,6 +245,7 @@ def _torch_loss(
     two_pi = torch.tensor(2 * math.pi, dtype=dtype, device=device)
 
     kaw_terms = []
+    angle_terms = []
     for center_idx, neighbor_idxs in kaw_specs:
         center = coords[center_idx]
         neighbors = coords[neighbor_idxs]
@@ -211,10 +255,25 @@ def _torch_loss(
         even_sum = gaps[0::2].sum()
         odd_sum = gaps[1::2].sum()
         kaw_terms.append(((even_sum - pi) / pi) ** 2 + ((odd_sum - pi) / pi) ** 2)
+        if min_angle_gap > 0.0:
+            angle_terms.append((torch.relu(min_angle_gap - gaps) / pi) ** 2)
     if kaw_terms:
-        kaw_loss = torch.stack(kaw_terms).mean()
+        kaw_stack = torch.stack(kaw_terms)
+        kaw_loss = kaw_stack.mean()
+        if worst_weight > 0.0:
+            tau = max(float(logsumexp_tau), 1e-3)
+            tau_t = torch.tensor(tau, dtype=dtype, device=device)
+            worst_loss = tau_t * torch.logsumexp(kaw_stack / tau_t, dim=0)
+        else:
+            worst_loss = torch.zeros((), dtype=dtype, device=device)
     else:
         kaw_loss = torch.zeros((), dtype=dtype, device=device)
+        worst_loss = torch.zeros((), dtype=dtype, device=device)
+
+    if angle_terms:
+        angle_loss = torch.cat(angle_terms).mean()
+    else:
+        angle_loss = torch.zeros((), dtype=dtype, device=device)
 
     sym_terms = []
     for right_idx, left_idx in sym_pairs:
@@ -240,7 +299,13 @@ def _torch_loss(
     else:
         move_loss = torch.zeros((), dtype=dtype, device=device)
 
-    return kaw_weight * kaw_loss + symmetry_weight * sym_loss + 0.25 * short_loss + move_weight * move_loss
+    return (
+        kaw_weight * (kaw_loss + worst_weight * worst_loss)
+        + angle_gap_weight * angle_loss
+        + symmetry_weight * sym_loss
+        + 0.25 * short_loss
+        + move_weight * move_loss
+    )
 
 
 def _apply_coords(G: nx.Graph, nodes: List[int], coords: np.ndarray) -> nx.Graph:
@@ -265,23 +330,48 @@ def gradient_repair_kawasaki_symmetry(
     border: float = BORDER,
     boundary_tol: float = BOUNDARY_TOL,
     reject_crossings: bool = True,
+    mutable_nodes: Optional[Iterable[int]] = None,
+    target_nodes: Optional[Iterable[int]] = None,
+    min_angle_gap_deg: float = 8.0,
+    angle_gap_weight: float = 0.75,
+    worst_weight: float = 0.75,
+    logsumexp_tau: float = 0.25,
 ) -> Tuple[nx.Graph, RepairStats]:
-    before_obj, before_kaw, before_sym = geometry_objective(G, symmetry_weight=0.5)
+    objective_symmetry_weight = symmetry_weight if symmetry_weight > 0.0 else 0.0
     nodes = list(G.nodes())
     if not nodes:
-        return G, RepairStats(False, before_obj, before_obj, before_kaw, before_kaw, before_sym, before_sym, "empty")
+        return G, RepairStats(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "empty")
 
-    mutable_nodes = [n for n in nodes if not is_boundary_node(G, n, border, boundary_tol)]
+    if mutable_nodes is None:
+        mutable_nodes = [n for n in nodes if not is_boundary_node(G, n, border, boundary_tol)]
+    else:
+        mutable_nodes = [
+            n for n in mutable_nodes
+            if n in G and not is_boundary_node(G, n, border, boundary_tol)
+        ]
     if not mutable_nodes:
-        return G, RepairStats(False, before_obj, before_obj, before_kaw, before_kaw, before_sym, before_sym, "no mutable nodes")
+        return G, RepairStats(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "no mutable nodes")
+
+    if target_nodes is None:
+        target_nodes = [n for n in nodes if is_interior_vertex(G, n)]
+    else:
+        target_nodes = [n for n in target_nodes if n in G and is_interior_vertex(G, n)]
+    if not target_nodes:
+        return G, RepairStats(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "no target nodes")
+
+    before_kaw = kawasaki_mean_for_nodes(G, target_nodes)
+    before_sym = symmetry_error(G) if objective_symmetry_weight > 0.0 else 0.0
+    before_obj = before_kaw + objective_symmetry_weight * before_sym
 
     node_to_idx = {node: i for i, node in enumerate(nodes)}
     mutable_indices = [node_to_idx[n] for n in mutable_nodes]
     fixed_indices = [i for i, n in enumerate(nodes) if n not in mutable_nodes]
 
-    kaw_specs = _neighbor_order_specs(G, node_to_idx)
-    sym_pairs = _symmetry_pairs(G, nodes, mutable_nodes, node_to_idx, pair_tol)
-    edge_pairs = _edge_index_pairs(G, node_to_idx)
+    kaw_specs = _neighbor_order_specs_for_nodes(G, node_to_idx, target_nodes)
+    sym_pairs = []
+    if symmetry_weight > 0.0:
+        sym_pairs = _symmetry_pairs(G, nodes, list(mutable_nodes), node_to_idx, pair_tol)
+    edge_pairs = _edge_index_pairs_for_nodes(G, node_to_idx, mutable_nodes)
     if not kaw_specs and not sym_pairs:
         return G, RepairStats(False, before_obj, before_obj, before_kaw, before_kaw, before_sym, before_sym, "no repair terms")
 
@@ -292,6 +382,7 @@ def gradient_repair_kawasaki_symmetry(
     mutable_idx = torch.tensor(mutable_indices, dtype=torch.long, device=device)
     fixed_idx = torch.tensor(fixed_indices, dtype=torch.long, device=device)
     optimizer = torch.optim.Adam([coords], lr=lr)
+    min_angle_gap = math.radians(max(0.0, float(min_angle_gap_deg)))
 
     limit = border - 20.0
     best_loss = float("inf")
@@ -311,6 +402,10 @@ def gradient_repair_kawasaki_symmetry(
             move_weight,
             min_edge_length,
             SCALE,
+            min_angle_gap=min_angle_gap,
+            angle_gap_weight=angle_gap_weight,
+            worst_weight=worst_weight,
+            logsumexp_tau=logsumexp_tau,
         )
         loss.backward()
         optimizer.step()
@@ -332,7 +427,9 @@ def gradient_repair_kawasaki_symmetry(
 
     candidate = _apply_coords(G, nodes, best_coords.detach().cpu().numpy())
     candidate = _recompute_features(candidate)
-    after_obj, after_kaw, after_sym = geometry_objective(candidate, symmetry_weight=0.5)
+    after_kaw = kawasaki_mean_for_nodes(candidate, target_nodes)
+    after_sym = symmetry_error(candidate) if objective_symmetry_weight > 0.0 else 0.0
+    after_obj = after_kaw + objective_symmetry_weight * after_sym
 
     if reject_crossings and has_crossings(candidate):
         return G, RepairStats(False, before_obj, after_obj, before_kaw, after_kaw, before_sym, after_sym, "crossing")

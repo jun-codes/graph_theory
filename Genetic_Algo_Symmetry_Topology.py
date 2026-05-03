@@ -22,6 +22,7 @@ import numpy as np
 import torch
 from cp_io import write_cp_collection, write_cp_file
 from gradient_geometry_repair import gradient_repair_kawasaki_symmetry
+from line_graph_ga_filter import LineGraphGAFilter
 try:
     from maekawa_z3_repair import repair_maekawa_z3
 except Exception:
@@ -194,6 +195,8 @@ with open(f"{BASE}\\graphs.pkl", 'rb') as f:
     real_graphs = pickle.load(f)
 print(f"Loaded {len(real_graphs)} real CPs for novelty reference")
 print("Z3 Maekawa repair " + ("enabled" if repair_maekawa_z3 else "unavailable; using heuristic folds"))
+line_filter = LineGraphGAFilter(min_valid_prob=0.50, penalty_weight=1.0)
+print("Line-GNN filter loaded (threshold=0.50, weight=1.0)")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Border detection — coordinate-based only (never touch these nodes)
@@ -1007,6 +1010,56 @@ def edge_length_stats(G):
     return len(lengths), float(np.mean(lengths)), float(np.max(lengths))
 
 
+def clump_penalty(G, min_node_gap=18.0, min_edge_len=18.0, min_angle_deg=12.0):
+    """Penalise crowded vertices, tiny creases, and nearly parallel rays."""
+    mutable = [n for n in G.nodes() if is_interior(G, n) and not is_border_node(G, n)]
+    if not mutable:
+        return 0.0
+
+    node_hits = 0.0
+    checked = 0
+    for i, u in enumerate(mutable):
+        ux, uy = G.nodes[u]['x'], G.nodes[u]['y']
+        for v in mutable[i + 1:]:
+            vx, vy = G.nodes[v]['x'], G.nodes[v]['y']
+            d = math.hypot(ux - vx, uy - vy)
+            if d < min_node_gap:
+                node_hits += (min_node_gap - d) / min_node_gap
+            checked += 1
+    node_term = node_hits / max(1, checked)
+
+    short_hits = []
+    for u, v in interior_crease_edges(G):
+        d = _edge_len(G, u, v)
+        if d < min_edge_len:
+            short_hits.append((min_edge_len - d) / min_edge_len)
+    short_term = float(np.mean(short_hits)) if short_hits else 0.0
+
+    min_angle = math.radians(min_angle_deg)
+    angle_hits = []
+    for n in mutable:
+        gaps = _angle_gaps(G, n)
+        if gaps:
+            small = [max(0.0, min_angle - g) / min_angle for g in gaps]
+            angle_hits.extend(v for v in small if v > 0.0)
+    angle_term = float(np.mean(angle_hits)) if angle_hits else 0.0
+
+    return float(2.0 * node_term + 0.8 * short_term + 1.2 * angle_term)
+
+
+def node_spacing_ok(G, node, min_gap=14.0):
+    if is_border_node(G, node):
+        return True
+    x, y = G.nodes[node]['x'], G.nodes[node]['y']
+    for other in G.nodes():
+        if other == node or is_border_node(G, other):
+            continue
+        ox, oy = G.nodes[other]['x'], G.nodes[other]['y']
+        if math.hypot(x - ox, y - oy) < min_gap:
+            return False
+    return True
+
+
 def compute_similarity(G1, G2):
     def fv(G):
         degs = sorted([d for _, d in G.degree()], reverse=True)
@@ -1058,7 +1111,7 @@ def fitness(G, gen=1, max_gen=MAX_GEN):
             G.number_of_nodes() < MIN_TOTAL_NODES or
             odd_count > 0 or
             topo_bad > 0):
-        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return -10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 2.0
 
     gnn  = gnn_score(G)
     kaw  = kawasaki_penalty(G)
@@ -1067,18 +1120,30 @@ def fitness(G, gen=1, max_gen=MAX_GEN):
     nov  = novelty_penalty(G, real_graphs)
     comp = complexity_bonus(G)
     elen = edge_length_penalty(G)
+    clump = clump_penalty(G)
+    line_prob = line_filter.valid_probability(G)
+    line_pen = line_filter.penalty(G)
+    z3_pen = 0.0 if G.graph.get('z3_status', 'missing') in ('sat', 'skipped') else 1.25
+    topology_pen = 0.0 if G.graph.get('topology_status', 'missing') in ('repaired', 'skipped') else 1.25
 
     t     = gen / max_gen
-    kaw_w = 1.00 + 0.80 * t
+    kaw_w = 0.75 + 0.65 * t
+    if kaw < 0.08 and odd_count == 0 and topo_bad == 0:
+        kaw_w *= 0.45
 
     score = (gnn
-             + 0.70 * comp
+             + 0.80 * line_prob
+             + 0.55 * comp
              - kaw_w * kaw
              - 0.35 * mae
              - 0.35 * sym
              - 0.30 * nov
-             - 0.20 * elen)
-    return score, gnn, kaw, mae, sym, nov, comp, elen
+             - 0.20 * elen
+             - 0.55 * clump
+             - 0.70 * line_pen
+             - z3_pen
+             - topology_pen)
+    return score, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Random planar graph seed (fully connected, symmetric, clean border)
@@ -1394,7 +1459,7 @@ def make_random_planar_graph(scale=SCALE):
         kaw_passes=0 if USE_SYMMETRY else 1,
         kaw_steps=0 if USE_SYMMETRY else 22,
         density=not USE_SYMMETRY,
-        solve_maekawa=not USE_SYMMETRY,
+        solve_maekawa=True,
     )
     G = recompute_features(G)
     return G
@@ -1472,20 +1537,28 @@ def repair_symmetric_candidate(G, *, kaw_passes=1, kaw_steps=35):
         kaw_passes=0,
         kaw_steps=0,
         density=False,
-        solve_maekawa=False,
+        solve_maekawa=True,
     )
     _overwrite_graph(G, repaired)
     recompute_features(G)
     return G
 
 
-MUTATION_WEIGHTS = [
-    ('flip_fold',   25),
-    ('move_node',   15),
-    ('kaw_repair',  25),
+LEGACY_MUTATION_WEIGHTS = [
+    ('flip_fold',   22),
+    ('move_node',   24),
+    ('kaw_repair',  22),
     ('trim_long',    5),    # v6b: much lower — only trim truly extreme edges
     ('add_edge',    22),    # v6b: higher — encourage adding structure
     ('remove_edge',  8),    # v6b: lower — discourage deleting edges
+]
+MUTATION_WEIGHTS = [
+    ('flip_fold',   22),
+    ('move_node',   24),
+    ('kaw_repair',  22),
+    ('trim_long',    4),
+    ('add_edge',    16),
+    ('remove_edge',  6),
 ]
 _MUT_NAMES, _MUT_W = zip(*MUTATION_WEIGHTS)
 _MUT_CUM = []
@@ -1553,7 +1626,8 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
 
         # Rebuild tree excluding this node's incident edges
         tree2, segs2, meta2 = _build_strtree(G, exclude_nodes=(node,))
-        if any_incident_crosses(G, node, tree2, segs2, meta2):
+        if (not node_spacing_ok(G, node, min_gap=14.0) or
+                any_incident_crosses(G, node, tree2, segs2, meta2)):
             G.nodes[node]['x'] = old_x
             G.nodes[node]['y'] = old_y
         else:
@@ -1636,7 +1710,7 @@ def mutate(G, gen=1, max_gen=MAX_GEN):
         kaw_passes=0,
         kaw_steps=0,
         density=not USE_SYMMETRY,
-        solve_maekawa=not USE_SYMMETRY,
+        solve_maekawa=True,
     )
     G = recompute_features(G)
     return G
@@ -1769,7 +1843,9 @@ def run_ga(population_size=30, generations=MAX_GEN,
     # ── Debug: visualise initial seeds ─────────────────────────────────
     visualise_initial_population(population)
 
-    best_scores, mean_scores, kaw_scores, sym_scores, gnn_scores = [], [], [], [], []
+    best_scores, mean_scores = [], []
+    kaw_scores, sym_scores, gnn_scores = [], [], []
+    line_scores, clump_scores = [], []
     best_ever, best_ever_score = None, -999.0
 
     for gen in range(1, generations + 1):
@@ -1777,8 +1853,11 @@ def run_ga(population_size=30, generations=MAX_GEN,
         raw_fits = []
         for G in population:
             result = fitness(G, gen=gen, max_gen=generations)
-            f, gnn, kaw, mae, sym, nov, comp, elen = result
-            scored.append((f, gnn, kaw, mae, sym, nov, comp, elen, G))
+            f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen = result
+            scored.append((
+                f, gnn, kaw, mae, sym, nov, comp, elen,
+                line_prob, clump, line_pen, G,
+            ))
             raw_fits.append(f)
 
         shared        = shared_fitness(population, raw_fits)
@@ -1792,30 +1871,35 @@ def run_ga(population_size=30, generations=MAX_GEN,
         kaw_scores.append(top[2])
         sym_scores.append(top[4])
         gnn_scores.append(top[1])
+        line_scores.append(top[8])
+        clump_scores.append(top[9])
 
         if top[0] > best_ever_score:
             best_ever_score = top[0]
-            best_ever       = copy.deepcopy(top[8])  # G is now at index 8
+            best_ever       = copy.deepcopy(top[11])
 
         t = gen / generations
         if gen % 5 == 0 or gen == 1:
             # Diagnostic: edge stats for the best individual
-            n_e, avg_e, max_e = edge_length_stats(top[8])
-            n_nodes = top[8].number_of_nodes()
-            kaw_mean, kaw_max, odd_count, _ = kawasaki_stats(top[8])
-            topo_bad = topology_bad_count(top[8])
+            n_e, avg_e, max_e = edge_length_stats(top[11])
+            n_nodes = top[11].number_of_nodes()
+            kaw_mean, kaw_max, odd_count, _ = kawasaki_stats(top[11])
+            topo_bad = topology_bad_count(top[11])
+            kaw_w = 0.75 + 0.65 * t
+            if top[2] < 0.08 and odd_count == 0 and topo_bad == 0:
+                kaw_w *= 0.45
             print(f"Gen {gen:03d} | fit={top[0]:.4f} GNN={top[1]:.3f} "
-                  f"Kaw={top[2]:.3f}[w={1.00 + 0.80*t:.2f}] "
+                  f"Line={top[8]:.3f} Kaw={top[2]:.3f}[w={kaw_w:.2f}] "
                   f"KMean={kaw_mean:.3f} KMax={kaw_max:.3f} "
                   f"Odd={odd_count} TopoBad={topo_bad} "
                   f"Mae={top[3]:.3f} Sym={top[4]:.3f} "
-                  f"ELen={top[7]:.3f} "
+                  f"ELen={top[7]:.3f} Clump={top[9]:.3f} "
                   f"| N={n_nodes} E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f} "
                   f"| Mean={np.mean(raw_fits):.4f}")
 
         # ── Build next generation ──────────────────────────────────────────
-        new_pop  = [copy.deepcopy(s[8]) for s in scored[:elite_keep]]
-        top_half = [s[1][8] for s in shared_scored[:population_size // 2]]
+        new_pop  = [copy.deepcopy(s[11]) for s in scored[:elite_keep]]
+        top_half = [s[1][11] for s in shared_scored[:population_size // 2]]
 
         while len(new_pop) < population_size:
             parent = random.choice(top_half)
@@ -1848,42 +1932,47 @@ def run_ga(population_size=30, generations=MAX_GEN,
     axes[0, 0].plot(best_scores, 'b', label='best')
     axes[0, 0].plot(mean_scores, 'orange', linestyle='--', label='mean')
     axes[0, 0].set_title('Fitness'); axes[0, 0].legend()
-    axes[0, 1].plot(gnn_scores, 'purple'); axes[0, 1].set_title('GNN Score (best)')
+    axes[0, 1].plot(gnn_scores, 'purple', label='node GNN')
+    axes[0, 1].plot(line_scores, 'black', linestyle='--', label='line GNN')
+    axes[0, 1].set_title('Classifier Scores (best)'); axes[0, 1].legend()
     axes[1, 0].plot(kaw_scores, 'r');      axes[1, 0].set_title('Kawasaki (best)')
-    axes[1, 1].plot(sym_scores, 'g');      axes[1, 1].set_title('Symmetry (best)')
+    axes[1, 1].plot(sym_scores, 'g', label='symmetry')
+    axes[1, 1].plot(clump_scores, 'brown', linestyle='--', label='clump')
+    axes[1, 1].set_title('Shape Penalties (best)'); axes[1, 1].legend()
     for ax in axes.flatten():
         ax.set_xlabel('Generation')
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\ga_convergence.png", dpi=150)
+    plt.savefig(f"{BASE}\\sym_topology_ga_convergence.png", dpi=150)
     plt.show()
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
-    final_pop  = [s[8] for s in scored]
+    final_pop  = [s[11] for s in scored]
     final_fits = [s[0] for s in scored]
     diverse6   = select_diverse_top(final_pop, final_fits, k=6)
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, G in enumerate(diverse6):
-        f, gnn, kaw, mae, sym, nov, comp, elen = fitness(
+        f, gnn, kaw, mae, sym, nov, comp, elen, line_prob, clump, line_pen = fitness(
             G, gen=generations, max_gen=generations)
         n_e, avg_e, max_e = edge_length_stats(G)
         visualise(G,
                   title=(f"Rank {i+1} fit={f:.3f} GNN={gnn:.3f} "
-                         f"Kaw={kaw:.3f} Mae={mae:.3f}\n"
-                         f"N={G.number_of_nodes()} E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f}"),
+                         f"Line={line_prob:.3f} Kaw={kaw:.3f} Mae={mae:.3f}\n"
+                         f"Clump={clump:.3f} N={G.number_of_nodes()} "
+                         f"E={n_e} avgL={avg_e:.0f} maxL={max_e:.0f}"),
                   ax=axes.flatten()[i])
     plt.suptitle("Top 6 Generated Crease Patterns (Diverse)", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\ga_top6.png", dpi=150)
+    plt.savefig(f"{BASE}\\sym_topology_ga_top6.png", dpi=150)
     plt.show()
 
-    with open(f"{BASE}\\best_generated.pkl", 'wb') as f:
+    with open(f"{BASE}\\sym_topology_best_generated.pkl", 'wb') as f:
         pickle.dump(best_ever, f)
-    with open(f"{BASE}\\diverse_top6.pkl", 'wb') as f:
+    with open(f"{BASE}\\sym_topology_diverse_top6.pkl", 'wb') as f:
         pickle.dump(diverse6, f)
-    write_cp_file(best_ever, f"{BASE}\\best_generated.cp")
-    write_cp_collection(diverse6, f"{BASE}\\diverse_top6_cp", prefix="rank")
-    print("Saved best_generated.pkl + diverse_top6.pkl + editable .cp exports")
+    write_cp_file(best_ever, f"{BASE}\\sym_topology_best_generated.cp")
+    write_cp_collection(diverse6, f"{BASE}\\sym_topology_diverse_top6_cp", prefix="rank")
+    print("Saved sym_topology_best_generated.pkl + sym_topology_diverse_top6.pkl + editable .cp exports")
     return best_ever, scored, diverse6
 
 
