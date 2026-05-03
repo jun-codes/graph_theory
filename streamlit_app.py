@@ -10,6 +10,7 @@ import time
 import zipfile
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
@@ -27,6 +28,9 @@ DIVERSE_PKL = ROOT / f"{PREFIX}_diverse_top6.pkl"
 BEST_CP = ROOT / f"{PREFIX}_best_generated.cp"
 CP_DIR = ROOT / f"{PREFIX}_diverse_top6_cp"
 RUN_LOG = ROOT / f"{PREFIX}_streamlit_run.log"
+DASHBOARD_IMAGE = ROOT / "dashboard.png"
+GITHUB_REPO_URL = "https://github.com/jun-codes/graph_theory"
+DASHBOARD_URL = "https://origamigenerator.streamlit.app/"
 
 
 def load_pickle(path: Path):
@@ -53,6 +57,32 @@ def zip_cp_files(paths: list[Path]) -> bytes:
     return buffer.getvalue()
 
 
+def cp_dataset_rows() -> list[dict[str, object]]:
+    rows = []
+    for path in cp_files():
+        line_count = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        rows.append(
+            {
+                "file": path.name,
+                "creases": line_count,
+                "format": "fold_type x1 y1 x2 y2",
+                "source": "z3 symmetry Kawasaki top-6 export",
+            }
+        )
+    if BEST_CP.exists():
+        line_count = len(BEST_CP.read_text(encoding="utf-8", errors="replace").splitlines())
+        rows.insert(
+            0,
+            {
+                "file": BEST_CP.name,
+                "creases": line_count,
+                "format": "fold_type x1 y1 x2 y2",
+                "source": "best generated export",
+            },
+        )
+    return rows
+
+
 def graph_rows() -> list[dict[str, object]]:
     graphs = load_pickle(DIVERSE_PKL)
     if not isinstance(graphs, list):
@@ -77,6 +107,13 @@ def graph_rows() -> list[dict[str, object]]:
     return rows
 
 
+def render_graph(graph, title: str):
+    fig, ax = plt.subplots(figsize=(4.2, 4.2))
+    oc.visualise_with_violations(graph, title=title, ax=ax)
+    fig.tight_layout(pad=0.2)
+    return fig
+
+
 def run_algorithm(
     *,
     population_size: int,
@@ -89,7 +126,7 @@ def run_algorithm(
     start = time.perf_counter()
 
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-        module = importlib.import_module("Genetic_Algo_Z3_Topology_Symmetry_Kawasaki.py")
+        module = importlib.import_module("Genetic_Algo_Z3_Topology_Symmetry_Kawasaki")
         module.BASE = str(ROOT)
         module.USE_SYMMETRY = True
         module.SYMMETRY_MODE = symmetry_mode
@@ -108,7 +145,7 @@ def run_algorithm(
 
 
 def render_artifacts() -> None:
-    st.subheader(" Sample candidates. May require manual fixing.")
+    st.subheader("Generated Candidates")
 
     if TOP6_IMAGE.exists():
         st.image(TOP6_IMAGE.read_bytes(), caption=TOP6_IMAGE.name, use_container_width=True)
@@ -118,10 +155,27 @@ def render_artifacts() -> None:
     rows = graph_rows()
     if rows:
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        graphs = load_pickle(DIVERSE_PKL)
+        if isinstance(graphs, list) and graphs:
+            st.subheader("Individual Graph Views")
+            cols = st.columns(3)
+            for idx, graph in enumerate(graphs[:6], start=1):
+                with cols[(idx - 1) % 3]:
+                    fig = render_graph(graph, f"rank {idx}")
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
 
     cp_paths = cp_files()
     if cp_paths or BEST_CP.exists():
-        st.subheader("Download CP Files")
+        st.subheader("CP File Dataset")
+        dataset_rows = cp_dataset_rows()
+        if dataset_rows:
+            st.dataframe(pd.DataFrame(dataset_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "Each .cp row stores one crease as: fold_type x1 y1 x2 y2, "
+                "where 1=border, 2=mountain, and 3=valley."
+            )
+
         cols = st.columns(3)
 
         if BEST_CP.exists():
@@ -181,7 +235,26 @@ def main() -> None:
     )
 
     st.title("Origami Generator")
-    st.caption("Generate crease-pattern graphs and download editable .cp files.")
+    st.caption("Generate theorem-repaired crease-pattern graphs and download editable .cp files.")
+
+    st.markdown(
+        f"[GitHub repository]({GITHUB_REPO_URL}) | [Public Streamlit dashboard]({DASHBOARD_URL})"
+    )
+
+    with st.expander("Dashboard, dataset, and reusable code", expanded=True):
+        st.write(
+            "This dashboard exposes the Z3, topology, symmetry, and Kawasaki-repaired "
+            "generation pipeline as a reusable interface. It shows the top generated "
+            "crease patterns, reports local constraint diagnostics, and packages the "
+            "best and diverse top-six candidates as editable CP files."
+        )
+        st.write(
+            "The bundled CP dataset is stored in "
+            f"`{CP_DIR.name}/` plus `{BEST_CP.name}`. These files can be opened in "
+            "crease-pattern tools or reused as generated examples for later experiments."
+        )
+        if DASHBOARD_IMAGE.exists():
+            st.image(DASHBOARD_IMAGE.read_bytes(), caption="Dashboard screenshot", use_container_width=True)
 
     with st.sidebar:
         st.header("Run Settings")

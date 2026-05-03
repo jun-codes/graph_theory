@@ -4,3 +4,6 @@ networkx
 numpy
 pandas
 shapely
+torch
+torch-geometric
+z3-solver
