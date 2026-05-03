@@ -27,14 +27,18 @@ from line_graph_scoring import (
 
 
 BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+OUTPUTS_DIR = BASE / "outputs"
 
 
 DEFAULT_TARGETS = [
-    ("graphs.pkl", 1),
-    ("negatives.pkl", 0),
-    ("negatives_v3.pkl", 0),
-    ("best_generated.pkl", None),
-    ("diverse_top6.pkl", None),
+    (DATA_DIR / "graphs.pkl", 1),
+    (DATA_DIR / "negatives.pkl", 0),
+    (DATA_DIR / "negatives_v3.pkl", 0),
+    (OUTPUTS_DIR / "baseline" / "best_generated.pkl", None),
+    (OUTPUTS_DIR / "baseline" / "diverse_top6.pkl", None),
+    (OUTPUTS_DIR / "z3_symmetry_kawasaki" / "z3_symmetry_kawasaki_best_generated.pkl", None),
+    (OUTPUTS_DIR / "z3_symmetry_kawasaki" / "z3_symmetry_kawasaki_diverse_top6.pkl", None),
 ]
 
 

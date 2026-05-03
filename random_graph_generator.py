@@ -1,6 +1,8 @@
 
 
 import pickle
+from pathlib import Path
+
 import torch
 import numpy as np
 import networkx as nx
@@ -33,11 +35,12 @@ class GINClassifier(torch.nn.Module):
                         global_max_pool(x, batch)], dim=1)
         return self.classifier(x)
 
+BASE = Path(__file__).resolve().parent
+MODEL_PATH = BASE / "models" / "best_model.pt"
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(
-    r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\best_model.pt",
-    weights_only=False))
+model.load_state_dict(torch.load(MODEL_PATH, weights_only=False))
 model.eval()
 print("Model loaded")
 

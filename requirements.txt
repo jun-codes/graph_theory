@@ -3,7 +3,9 @@ matplotlib
 networkx
 numpy
 pandas
+scipy
 shapely
 torch
 torch-geometric
 z3-solver
+opencv-python-headless

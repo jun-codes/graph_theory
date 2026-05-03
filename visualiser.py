@@ -1,10 +1,15 @@
 import pickle
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import networkx as nx
 import random
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb') as f:
+BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+
+with (DATA_DIR / "negatives.pkl").open('rb') as f:
     graphs = pickle.load(f)
 
 G = random.choice(graphs)

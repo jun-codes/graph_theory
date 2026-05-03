@@ -21,81 +21,50 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 ROOT = Path(__file__).resolve().parent
 PREFIX = "z3_symmetry_kawasaki"
-ARTIFACT_TAG = "1"
+OUTPUTS_DIR = ROOT / "outputs"
+FINAL_OUTPUT_DIR = OUTPUTS_DIR / PREFIX
+FINAL_RUN_DIRS = [
+    OUTPUTS_DIR / PREFIX,
+    OUTPUTS_DIR / f"{PREFIX}_1",
+    ROOT,
+]
+RUN_LOG = FINAL_OUTPUT_DIR / f"{PREFIX}_streamlit_run.log"
 
-RUN_LOG = ROOT / f"{PREFIX}_streamlit_run.log"
 
-
-def newest_existing(*paths: Path) -> Path:
+def newest_existing(paths: list[Path]) -> Path | None:
     existing = [path for path in paths if path.exists()]
     if existing:
         return max(existing, key=lambda path: path.stat().st_mtime_ns)
-    return paths[0]
+    return None
+
+
+def newest_matching(patterns: list[str], directories: list[Path] = FINAL_RUN_DIRS) -> Path | None:
+    matches: list[Path] = []
+    for directory in directories:
+        if not directory.exists():
+            continue
+        for pattern in patterns:
+            matches.extend(directory.glob(pattern))
+    return newest_existing(matches)
+
+
+def default_artifact_path(filename: str) -> Path:
+    return FINAL_OUTPUT_DIR / filename
 
 
 def refresh_artifact_paths() -> None:
     global TOP6_IMAGE, CONVERGENCE_IMAGE, VIOLATION_IMAGE, BEST_PKL, DIVERSE_PKL, BEST_CP, CP_DIR
 
-    TOP6_IMAGE = newest_existing(
-        ROOT / f"{PREFIX}_ga_top6_{ARTIFACT_TAG}.png",
-        ROOT / f"{PREFIX}_ga_top6.png",
-    )
-    CONVERGENCE_IMAGE = newest_existing(
-        ROOT / f"{PREFIX}_ga_convergence_{ARTIFACT_TAG}.png",
-        ROOT / f"{PREFIX}_ga_convergence{ARTIFACT_TAG}.png",
-        ROOT / f"{PREFIX}_ga_convergence.png",
-    )
-    VIOLATION_IMAGE = newest_existing(
-        ROOT / f"{PREFIX}_violation_top6_{ARTIFACT_TAG}.png",
-        ROOT / f"{PREFIX}_violation_top6.png",
-    )
-    BEST_PKL = newest_existing(
-        ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.pkl",
-        ROOT / f"{PREFIX}_best_generated.pkl",
-    )
-    DIVERSE_PKL = newest_existing(
-        ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}.pkl",
-        ROOT / f"{PREFIX}_diverse_top6.pkl",
-    )
-    BEST_CP = newest_existing(
-        ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.cp",
-        ROOT / f"{PREFIX}_best_generated.cp",
-    )
-    CP_DIR = newest_existing(
-        ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}_cp",
-        ROOT / f"{PREFIX}_diverse_top6_cp",
-    )
+    TOP6_IMAGE = newest_matching([f"{PREFIX}_ga_top6*.png"]) or default_artifact_path(f"{PREFIX}_ga_top6.png")
+    CONVERGENCE_IMAGE = newest_matching([f"{PREFIX}_ga_convergence*.png"]) or default_artifact_path(f"{PREFIX}_ga_convergence.png")
+    VIOLATION_IMAGE = newest_matching([f"{PREFIX}_violation_top6*.png"]) or default_artifact_path(f"{PREFIX}_violation_top6.png")
+    BEST_PKL = newest_matching([f"{PREFIX}_best_generated*.pkl"]) or default_artifact_path(f"{PREFIX}_best_generated.pkl")
+    DIVERSE_PKL = newest_matching([f"{PREFIX}_diverse_top6*.pkl"]) or default_artifact_path(f"{PREFIX}_diverse_top6.pkl")
+    BEST_CP = newest_matching([f"{PREFIX}_best_generated*.cp"]) or default_artifact_path(f"{PREFIX}_best_generated.cp")
+    CP_DIR = newest_matching([f"{PREFIX}_diverse_top6*_cp"]) or default_artifact_path(f"{PREFIX}_diverse_top6_cp")
 
 
-TOP6_IMAGE = newest_existing(
-    ROOT / f"{PREFIX}_ga_top6_{ARTIFACT_TAG}.png",
-    ROOT / f"{PREFIX}_ga_top6.png",
-)
-CONVERGENCE_IMAGE = newest_existing(
-    ROOT / f"{PREFIX}_ga_convergence_{ARTIFACT_TAG}.png",
-    ROOT / f"{PREFIX}_ga_convergence{ARTIFACT_TAG}.png",
-    ROOT / f"{PREFIX}_ga_convergence.png",
-)
-VIOLATION_IMAGE = newest_existing(
-    ROOT / f"{PREFIX}_violation_top6_{ARTIFACT_TAG}.png",
-    ROOT / f"{PREFIX}_violation_top6.png",
-)
-BEST_PKL = newest_existing(
-    ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.pkl",
-    ROOT / f"{PREFIX}_best_generated.pkl",
-)
-DIVERSE_PKL = newest_existing(
-    ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}.pkl",
-    ROOT / f"{PREFIX}_diverse_top6.pkl",
-)
-BEST_CP = newest_existing(
-    ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.cp",
-    ROOT / f"{PREFIX}_best_generated.cp",
-)
-CP_DIR = newest_existing(
-    ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}_cp",
-    ROOT / f"{PREFIX}_diverse_top6_cp",
-)
+refresh_artifact_paths()
 
 
 def load_pickle(path: Path):
@@ -193,6 +162,7 @@ def run_algorithm(
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
         module = importlib.import_module("Genetic_Algo_Z3_Topology_Symmetry_Kawasaki")
         module.BASE = str(ROOT)
+        module.OUTPUT_DIR = FINAL_OUTPUT_DIR
         module.USE_SYMMETRY = True
         module.SYMMETRY_MODE = symmetry_mode
         module.run_ga(
@@ -205,6 +175,7 @@ def run_algorithm(
     elapsed = time.perf_counter() - start
     text = output.getvalue()
     text += f"\nStreamlit run completed in {elapsed:.1f}s\n"
+    RUN_LOG.parent.mkdir(parents=True, exist_ok=True)
     RUN_LOG.write_text(text, encoding="utf-8")
     return text
 
@@ -214,7 +185,7 @@ def render_artifacts() -> None:
     st.subheader("Generated Candidates")
 
     if TOP6_IMAGE.exists():
-        st.image(TOP6_IMAGE.read_bytes(), caption=TOP6_IMAGE.name, use_container_width=True)
+        st.image(TOP6_IMAGE.read_bytes(), caption=TOP6_IMAGE.name, width="stretch")
     else:
         st.info("No top-6 image exists yet. Run the algorithm to generate one.")
 
@@ -224,19 +195,19 @@ def render_artifacts() -> None:
             st.image(
                 CONVERGENCE_IMAGE.read_bytes(),
                 caption=CONVERGENCE_IMAGE.name,
-                use_container_width=True,
+                width="stretch",
             )
     if VIOLATION_IMAGE.exists():
         with artifact_cols[1]:
             st.image(
                 VIOLATION_IMAGE.read_bytes(),
                 caption=VIOLATION_IMAGE.name,
-                use_container_width=True,
+                width="stretch",
             )
 
     rows = graph_rows()
     if rows:
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
         graphs = load_pickle(DIVERSE_PKL)
         if isinstance(graphs, list) and graphs:
             st.subheader("Individual Graph Views")
@@ -244,7 +215,7 @@ def render_artifacts() -> None:
             for idx, graph in enumerate(graphs[:6], start=1):
                 with cols[(idx - 1) % 3]:
                     fig = render_graph(graph, f"rank {idx}")
-                    st.pyplot(fig, use_container_width=True)
+                    st.pyplot(fig, width="stretch")
                     plt.close(fig)
 
     cp_paths = cp_files()
@@ -252,7 +223,7 @@ def render_artifacts() -> None:
         st.subheader("CP File Dataset")
         dataset_rows = cp_dataset_rows()
         if dataset_rows:
-            st.dataframe(pd.DataFrame(dataset_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(dataset_rows), width="stretch", hide_index=True)
             st.caption(
                 "Each .cp row stores one crease as: fold_type x1 y1 x2 y2, "
                 "where 1=border, 2=mountain, and 3=valley."
@@ -267,7 +238,7 @@ def render_artifacts() -> None:
                     data=BEST_CP.read_bytes(),
                     file_name=BEST_CP.name,
                     mime="text/plain",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
         with cols[1]:
@@ -276,7 +247,7 @@ def render_artifacts() -> None:
                 data=zip_cp_files(cp_paths),
                 file_name=f"{PREFIX}_cp_files.zip",
                 mime="application/zip",
-                use_container_width=True,
+                width="stretch",
                 disabled=not cp_paths and not BEST_CP.exists(),
             )
 
@@ -294,7 +265,7 @@ def render_artifacts() -> None:
                         data=path.read_bytes(),
                         file_name=path.name,
                         mime="text/plain",
-                        use_container_width=True,
+                        width="stretch",
                         key=f"cp_download_{path.name}_{path.stat().st_mtime_ns}",
                     )
 
@@ -330,7 +301,7 @@ def main() -> None:
         run_clicked = st.button(
             "Generate Crease Patterns",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     if run_clicked:

@@ -24,6 +24,7 @@ import copy
 import math
 import pickle
 import random
+from pathlib import Path
 
 import networkx as nx
 import numpy as np
@@ -35,7 +36,9 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GINConv, global_max_pool, global_mean_pool
 
-BASE = r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project"
+BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+MODEL_DIR = BASE / "models"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -269,7 +272,7 @@ def make_corrupted_cp(real_graph):
 # ─────────────────────────────────────────────────────────────────────────────
 
 print("Loading real CPs (positives)...")
-with open(f"{BASE}\\graphs.pkl", 'rb') as f:
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     real_graphs = pickle.load(f)
 print(f"  {len(real_graphs)} real CPs loaded")
 
@@ -298,7 +301,8 @@ while len(raw_negatives) < n_neg and attempts < n_neg * 6:
 print(f"  {len(raw_negatives)} corrupted-CP negatives ready")
 
 # Save raw negatives for GA seeding
-with open(f"{BASE}\\negatives_v3.pkl", 'wb') as f:
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+with (DATA_DIR / "negatives_v3.pkl").open('wb') as f:
     pickle.dump(raw_negatives, f)
 print(f"Saved {len(raw_negatives)} raw corrupted-CP negatives → negatives_v3.pkl")
 
@@ -319,9 +323,9 @@ val_set   = all_data[n_train:n_train + n_val]
 test_set  = all_data[n_train + n_val:]
 
 print(f"\nDataset: {len(train_set)} train | {len(val_set)} val | {len(test_set)} test")
-torch.save(train_set, f"{BASE}\\train_v3.pt")
-torch.save(val_set,   f"{BASE}\\val_v3.pt")
-torch.save(test_set,  f"{BASE}\\test_v3.pt")
+torch.save(train_set, DATA_DIR / "train_v3.pt")
+torch.save(val_set,   DATA_DIR / "val_v3.pt")
+torch.save(test_set,  DATA_DIR / "test_v3.pt")
 print("Saved train_v3.pt / val_v3.pt / test_v3.pt")
 
 train_loader = DataLoader(train_set, batch_size=32, shuffle=True)
@@ -406,14 +410,15 @@ for epoch in range(1, epochs + 1):
 
     if val_acc > best_val_acc:
         best_val_acc = val_acc
-        torch.save(model.state_dict(), f"{BASE}\\best_model.pt")
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), MODEL_DIR / "best_model.pt")
 
     if epoch % 5 == 0:
         print(f"Epoch {epoch:03d} | Loss: {train_loss:.4f} | "
               f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | "
               f"Best Val: {best_val_acc:.4f}")
 
-model.load_state_dict(torch.load(f"{BASE}\\best_model.pt", weights_only=False))
+model.load_state_dict(torch.load(MODEL_DIR / "best_model.pt", weights_only=False))
 test_acc = evaluate(test_loader)
 print(f"\nFinal Test Accuracy: {test_acc:.4f}")
 print(f"Best Val Accuracy:   {best_val_acc:.4f}")

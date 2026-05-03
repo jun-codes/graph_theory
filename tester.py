@@ -1,15 +1,21 @@
+import argparse
+import math
+from pathlib import Path
+
 import torch
 import numpy as np
 import networkx as nx
-import cv2
-import pickle
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
 from torch.nn import Linear, BatchNorm1d, Sequential, ReLU
 from torch_geometric.nn import GINConv, global_mean_pool, global_max_pool
 
+import origami_constraints as oc
+
+BASE = Path(__file__).resolve().parent
+MODEL_PATH = BASE / "models" / "best_model.pt"
+SCALE = 200.0
+
 class GINClassifier(torch.nn.Module):
-    def __init__(self, in_channels=5, hidden=64, num_classes=2):
+    def __init__(self, in_channels=10, hidden=64, num_classes=2):
         super().__init__()
         def mlp(in_c, out_c):
             return Sequential(
@@ -33,9 +39,7 @@ class GINClassifier(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(
-    r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\best_model.pt",
-    weights_only=False))
+model.load_state_dict(torch.load(MODEL_PATH, weights_only=False))
 model.eval()
 print("Model loaded")
 
@@ -53,6 +57,8 @@ def test_cp_file(filepath):
     return edges
 
 def test_png_file(filepath):
+    import cv2
+
     img  = cv2.imread(filepath)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
@@ -119,15 +125,34 @@ def build_graph_from_edges(edges, tolerance=8.0):
     return G
 
 def predict(G):
+    oc.recompute_features(G)
     node_features = []
     for node in G.nodes():
-        x       = G.nodes[node]['x']
-        y       = G.nodes[node]['y']
-        degree  = G.nodes[node]['degree']
-        angles  = G.nodes[node]['angles']
-        angle_mean = float(np.mean(angles)) if angles else 0.0
-        angle_std  = float(np.std(angles))  if angles else 0.0
-        node_features.append([x, y, degree, angle_mean, angle_std])
+        x = G.nodes[node]['x'] / SCALE
+        y = G.nodes[node]['y'] / SCALE
+        neighbors = list(G.neighbors(node))
+        degree = len(neighbors)
+        is_border = 1.0 if (degree > 0 and all(G[node][nb].get('fold_type') == 1 for nb in neighbors)) else 0.0
+        gaps = oc.angle_gaps(G, node, non_border_only=False)
+        if gaps:
+            angle_mean = float(np.mean(gaps))
+            angle_std = float(np.std(gaps))
+            angle_min = float(np.min(gaps))
+            angle_max = float(np.max(gaps))
+        else:
+            angle_mean = angle_std = angle_min = angle_max = 0.0
+        node_features.append([
+            x,
+            y,
+            float(degree),
+            is_border,
+            angle_mean,
+            angle_std,
+            angle_min,
+            angle_max,
+            oc.kawasaki_at(G, node),
+            oc.maekawa_at(G, node),
+        ])
 
     x_tensor   = torch.tensor(node_features, dtype=torch.float)
     edge_index = []
@@ -156,16 +181,26 @@ def predict(G):
     print(f"  Confidence : {prob[0][pred].item()*100:.1f}%")
     print(f"  (valid={prob[0][1].item()*100:.1f}%, invalid={prob[0][0].item()*100:.1f}%)")
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Predict whether a .cp or .png file resembles a valid crease pattern.")
+    parser.add_argument("path", type=Path)
+    return parser.parse_args()
 
-test_file = r"C:\Users\Arjun\Desktop\test.cp"   
 
-print(f"\nTesting: {test_file}")
-if test_file.endswith('.cp'):
-    edges = test_cp_file(test_file)
-else:
-    edges = test_png_file(test_file)
+def main():
+    args = parse_args()
+    test_file = args.path
+    print(f"\nTesting: {test_file}")
+    if test_file.suffix.lower() == '.cp':
+        edges = test_cp_file(test_file)
+    else:
+        edges = test_png_file(str(test_file))
 
-print(f"  Edges found: {len(edges)}")
-G = build_graph_from_edges(edges)
-print(f"  Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
-predict(G)
+    print(f"  Edges found: {len(edges)}")
+    G = build_graph_from_edges(edges)
+    print(f"  Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
+    predict(G)
+
+
+if __name__ == "__main__":
+    main()

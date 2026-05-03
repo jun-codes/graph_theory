@@ -39,7 +39,11 @@ except Exception as exc:
 import origami_constraints as oc
 from topology_even_repair import repair_even_nonborder_topology
 
-BASE    = str(Path(__file__).resolve().parent)
+PROJECT_ROOT = Path(__file__).resolve().parent
+BASE    = str(PROJECT_ROOT)
+DATA_DIR = PROJECT_ROOT / "data"
+MODEL_DIR = PROJECT_ROOT / "models"
+OUTPUT_DIR = PROJECT_ROOT / "outputs" / "z3_symmetry_kawasaki"
 MAX_GEN = 80
 IN_CHAN = 10          # must match trained model
 SCALE   = 200.0
@@ -190,11 +194,11 @@ class GINClassifier(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(f"{BASE}\\best_model.pt", weights_only=False))
+model.load_state_dict(torch.load(MODEL_DIR / "best_model.pt", weights_only=False))
 model.eval()
 print(f"GNN loaded on {device}  (in_channels={IN_CHAN})")
 
-with open(f"{BASE}\\graphs.pkl", 'rb') as f:
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     real_graphs = pickle.load(f)
 print(f"Loaded {len(real_graphs)} real CPs for novelty reference")
 
@@ -1523,7 +1527,10 @@ def run_ga(population_size=50, generations=MAX_GEN,
     for ax in axes.flatten():
         ax.set_xlabel('Generation')
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\z3_symmetry_kawasaki_ga_convergence.png", dpi=150)
+    output_dir = Path(OUTPUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plt.savefig(output_dir / "z3_symmetry_kawasaki_ga_convergence.png", dpi=150)
     plt.close(fig)
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
@@ -1541,7 +1548,7 @@ def run_ga(population_size=50, generations=MAX_GEN,
                   ax=axes.flatten()[i])
     plt.suptitle("Top 6 Topology + Z3 + Kawasaki-Projected Crease Patterns", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\z3_symmetry_kawasaki_ga_top6.png", dpi=150)
+    plt.savefig(output_dir / "z3_symmetry_kawasaki_ga_top6.png", dpi=150)
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -1555,16 +1562,16 @@ def run_ga(population_size=50, generations=MAX_GEN,
             ax=axes.flatten()[i])
     plt.suptitle("Top 6 Local Constraint Violation Heatmap", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\z3_symmetry_kawasaki_violation_top6.png", dpi=150)
+    plt.savefig(output_dir / "z3_symmetry_kawasaki_violation_top6.png", dpi=150)
     plt.close(fig)
 
-    with open(f"{BASE}\\z3_symmetry_kawasaki_best_generated.pkl", 'wb') as f:
+    with (output_dir / "z3_symmetry_kawasaki_best_generated.pkl").open('wb') as f:
         pickle.dump(best_ever, f)
-    with open(f"{BASE}\\z3_symmetry_kawasaki_diverse_top6.pkl", 'wb') as f:
+    with (output_dir / "z3_symmetry_kawasaki_diverse_top6.pkl").open('wb') as f:
         pickle.dump(diverse6, f)
-    write_cp_file(best_ever, f"{BASE}\\z3_symmetry_kawasaki_best_generated.cp")
+    write_cp_file(best_ever, output_dir / "z3_symmetry_kawasaki_best_generated.cp")
     write_cp_collection(
-        diverse6, f"{BASE}\\z3_symmetry_kawasaki_diverse_top6_cp", prefix="rank")
+        diverse6, output_dir / "z3_symmetry_kawasaki_diverse_top6_cp", prefix="rank")
     print("Saved z3_symmetry_kawasaki_best_generated.pkl + z3_symmetry_kawasaki_diverse_top6.pkl + editable .cp exports")
     return best_ever, scored, diverse6
 

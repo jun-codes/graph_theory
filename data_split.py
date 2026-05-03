@@ -1,14 +1,19 @@
 import pickle
+from pathlib import Path
+
 import torch
 import numpy as np
 import networkx as nx
 from torch_geometric.data import Data, InMemoryDataset
 from torch_geometric.loader import DataLoader
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl", 'rb') as f:
+BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     positives = pickle.load(f)
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb') as f:
+with (DATA_DIR / "negatives.pkl").open('rb') as f:
     negatives = pickle.load(f)
 
 print(f"Positives: {len(positives)}, Negatives: {len(negatives)}")
@@ -70,9 +75,10 @@ test_set  = dataset[val_end:]
 
 print(f"Train: {len(train_set)}, Val: {len(val_set)}, Test: {len(test_set)}")
 
-torch.save(train_set, r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\train.pt")
-torch.save(val_set,   r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\val.pt")
-torch.save(test_set,  r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\test.pt")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+torch.save(train_set, DATA_DIR / "train.pt")
+torch.save(val_set,   DATA_DIR / "val.pt")
+torch.save(test_set,  DATA_DIR / "test.pt")
 
 print("Saved train/val/test splits")
 

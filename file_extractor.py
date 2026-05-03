@@ -1,9 +1,11 @@
 import os
 import shutil
+from pathlib import Path
 
-source_dir = r"C:\Users\Arjun\Downloads\crease patterns"
-cp_output = r"C:\Users\Arjun\Downloads\dataset\cp_files"
-png_output = r"C:\Users\Arjun\Downloads\dataset\png_files"
+BASE = Path(__file__).resolve().parent
+source_dir = BASE / "raw_crease_patterns"
+cp_output = BASE / "dataset" / "cp_files"
+png_output = BASE / "dataset" / "png_files"
 
 os.makedirs(cp_output, exist_ok=True)
 os.makedirs(png_output, exist_ok=True)

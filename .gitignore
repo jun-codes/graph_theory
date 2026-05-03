@@ -1,5 +1,6 @@
 __pycache__/
 *.py[cod]
+*.log
 runs/_launch_smoke/
 runs/_sp_smoke/
 runs/startprocess_*.log

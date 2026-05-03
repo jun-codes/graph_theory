@@ -1,175 +1,152 @@
-Graph Theory Project: Crease Pattern Analysis and Generation
+# Origami Crease Pattern Generation
 
-This project uses machine learning and genetic algorithms to classify, analyze, and generate crease patterns (CPs) for origami. It combines graph neural networks with GA's to explore the space of valid fold patterns.
+This repository contains a graph-theoretic origami crease-pattern generation project. It combines graph neural networks, a crease-level line-graph classifier, genetic algorithms, topology repair, Z3 Maekawa repair, Kawasaki projection repair, gradient geometry repair, and symmetry-constrained generation.
 
-Overview
+The accompanying project report is stored at `reports/Graph_Theory.pdf`.
 
-The project has three main components:
+## Dashboard
 
-1. Data Processing: Load and parse crease pattern files, extract graph features, and split datasets for training.
-2. Classification: Train a Graph Isomorphism Network (GIN) to distinguish valid crease patterns from corrupted or invalid ones.
-3. Generation and Optimization: Use genetic algorithms to generate novel crease patterns and evaluate them against real-world designs.
+Run the Streamlit dashboard from the repository root:
 
-Project Structure
+```powershell
+python -m streamlit run streamlit_app.py
+```
 
-Core Training and Evaluation:
-- GNN_Classifier.py: Trains a Graph Isomorphism Network on labeled graph data. Uses 3 GIN layers with MLPs, global pooling, and a classifier head. Saves the best model to best_model.pt during training.
-- data_split.py: Loads positive examples (valid CPs) and negative examples (corrupted patterns), converts them to PyTorch Geometric format, and creates train/validation/test splits (80/10/10). Outputs to train.pt, val.pt, test.pt.
-- tester.py: Evaluates the trained model on new crease pattern files (both .cp text format and .png images). Extracts edges, builds node-edge graphs, and predicts validity.
-- LineGraph_Classifier.py: Trains a separate crease-line graph classifier. Each crease becomes a node in a line graph, and line-graph edges describe creases that meet at the same CP vertex.
-- line_graph_features.py: Converts NetworkX CP graphs into line-graph features with crease-level node features and crease-adjacency edge features.
-- line_graph_scoring.py: Loads line_best_model.pt and provides reusable line-GNN scoring utilities.
-- LineGraph_Tester.py: Evaluates .pkl graph artifacts or .cp files with the line-GNN, plus Kawasaki and Maekawa summaries.
-- line_graph_ga_filter.py: Optional helper for penalizing GA candidates that the line-GNN classifies as invalid. It is not wired into Genetic_Algo.py by default.
+The dashboard shows the current generated artifacts from `outputs/z3_symmetry_kawasaki/`, including:
 
-Generation:
-- Genetic_Algo.py: Evolves crease patterns using the trained GNN as a fitness function. Computes Kawasaki and Maekawa penalties (folding constraints), mutates graphs, and selects high-scoring candidates.
-- Genetic_Algo_Line_Filtered.py: Separate experimental copy of the GA that adds a conservative line-GNN validity penalty. It writes line_filtered_best_generated.pkl, line_filtered_diverse_top6.pkl, line_ga_convergence.png, and line_ga_top6.png without overwriting the original GA outputs.
-- random_graph_generator.py: Generates synthetic random graphs using Delaunay triangulation. Assigns fold types (mountain, valley, border) and node features (angle sequences, degree).
+- top-six generated crease-pattern image
+- convergence plot
+- local constraint violation plot
+- per-rank graph diagnostics
+- individual graph previews
+- downloadable `.cp` crease-pattern files
 
-Visualization:
-- similarity.py: Compares generated patterns to real dataset examples using graph signatures (nodes, edges, fold types, degree statistics).
-- comparison.py: Computes and plots statistical distributions (nodes, edges, degree, fold counts, fold ratios) comparing valid vs. invalid patterns.
-- visualiser.py: Renders graphs with color-coded edge types and node positions extracted from crease pattern data.
-- file_extractor.py: Parses .cp files and .png images to extract fold information and build NetworkX graphs.
+The public deployment link used for the project is:
 
+```text
+https://origamigenerator.streamlit.app/
+```
 
-Features
+## Repository Layout
 
-Graph Representation: Each crease pattern is stored as a NetworkX graph with:
-  - Node attributes: x, y coordinates, degree, angle sequence
-  - Edge attributes: fold_type (1=border, 2=mountain, 3=valley)
-  - Graph label: 1 for valid CPs, 0 for corrupted/invalid
+```text
+.
+├── data/                         # Graph datasets and train/val/test tensors
+├── examples/                     # Small example .cp files
+├── models/                       # Trained model checkpoints
+├── outputs/                      # Generated graphs, images, and .cp exports
+│   ├── baseline/
+│   ├── line_filtered/
+│   ├── line_repaired/
+│   ├── line_z3/
+│   ├── line_topology_z3/
+│   ├── line_kawasaki_z3/
+│   ├── sym_topology/
+│   ├── z3_symmetry_kawasaki/
+│   └── z3_symmetry_kawasaki_1/
+├── reports/                      # Final report PDF
+├── runs/                         # Longer historical experiment runs
+├── streamlit_app.py              # Dashboard entrypoint
+├── Genetic_Algo_Z3_Topology_Symmetry_Kawasaki.py
+├── GNN_Classifier.py
+├── LineGraph_Classifier.py
+└── requirements.txt
+```
 
-Neural Network Architecture: A 3-layer GIN with 64 hidden units, batch normalization, MLPs on edges, and global mean/max pooling. Output is a 2-class classifier (valid or invalid).
+Python scripts are kept at the root so the existing import style and Streamlit Cloud entrypoint remain simple. Large data, model, report, and output artifacts are organized into folders.
 
-Line-Graph Classifier: A separate GINE classifier treats creases as graph nodes. It uses 25 crease-node features and 10 crease-adjacency edge features, including fold type, line geometry, shared-vertex angle, cyclic adjacency, endpoint degree parity, and local Kawasaki/Maekawa residuals. The current checkpoint is line_best_model.pt.
+## Core Files
 
-Genetic Algorithm: Maintains a population of crease patterns, evaluates fitness using the GNN, applies mutations, and selects candidates with lowest Kawasaki/Maekawa penalties.
+- `streamlit_app.py`: Streamlit dashboard for displaying artifacts and running the final generator.
+- `Genetic_Algo_Z3_Topology_Symmetry_Kawasaki.py`: final generation pipeline.
+- `GNN_Classifier.py`: vertex-based GIN classifier training.
+- `LineGraph_Classifier.py`: crease-as-node line-graph classifier training.
+- `line_graph_scoring.py`: reusable line-GNN inference helper.
+- `origami_constraints.py`: local Kawasaki, Maekawa, crossing, and visualization utilities.
+- `topology_even_repair.py`: even-degree topology repair for Maekawa compatibility.
+- `maekawa_z3_repair.py`: Z3 mountain-valley assignment repair.
+- `kawasaki_projection_repair.py`: direct Kawasaki sector-angle projection repair.
+- `gradient_geometry_repair.py`: gradient coordinate repair for Kawasaki and symmetry.
+- `cp_io.py`: `.cp` export helpers.
 
-Input/Output Formats:
-  - Input: .cp files (fold_type x1 y1 x2 y2 per line) and .png images (edge detection via Canny)
-  - Output: pickle files with NetworkX graphs, PyTorch model checkpoints (.pt)
+## Data and Artifact Format
 
+Crease patterns are represented as NetworkX graphs. Nodes store embedded coordinates and local angular features. Edges store fold labels:
 
-Workflow:
+```text
+1 = border
+2 = mountain
+3 = valley
+```
 
-1. Prepare data:
-   python data_split.py
+Editable `.cp` files use one crease segment per row:
 
-2. Train the GNN classifier:
-   python GNN_Classifier.py
-   (Runs for 60 epochs, saves best model)
+```text
+fold_type x1 y1 x2 y2
+```
 
-3. Generate new patterns using genetics:
-   python Genetic_Algo.py
-   (Loads best_model.pt, evolves population)
+The current dashboard CP dataset is in:
 
-4. Test a specific file:
-   python tester.py <path_to_cp_or_png_file>
-   (Predicts if the pattern is a valid crease pattern)
+```text
+outputs/z3_symmetry_kawasaki/z3_symmetry_kawasaki_diverse_top6_cp/
+```
 
-5. Train the line-graph classifier:
-   python LineGraph_Classifier.py
-   (Saves line_best_model.pt)
+The best current generated candidate is:
 
-6. Evaluate line-graph classifier artifacts:
-   python LineGraph_Tester.py
-   (Evaluates graphs.pkl, negatives.pkl, negatives_v3.pkl, best_generated.pkl, and diverse_top6.pkl)
+```text
+outputs/z3_symmetry_kawasaki/z3_symmetry_kawasaki_best_generated.cp
+```
 
-7. Compare patterns:
-   python similarity.py
-   (Computes similarity between generated and real CPs)
+## Setup
 
-8. Visualize and analyze:
-   python comparison.py
-   (Histogram distributions of graph statistics)
-   python visualiser.py
-   (Plot an example from the dataset)
+Install dependencies:
 
-Recent Line-Graph Results:
+```powershell
+python -m pip install -r requirements.txt
+```
 
-- Full line-GNN test accuracy after 10 epochs: 0.9762
-- Held-out confusion matrix, rows=true [invalid, valid], cols=pred [invalid, valid]: [[66, 0], [3, 57]]
-- Full artifact evaluation:
-  - graphs.pkl: 607/626 predicted valid
-  - negatives.pkl: 625/626 predicted invalid
-  - negatives_v3.pkl: 612/626 predicted invalid
-  - best_generated.pkl: predicted invalid, valid probability about 0.0001
-  - diverse_top6.pkl: all six predicted invalid
+Main dependencies include Streamlit, PyTorch, PyTorch Geometric, NetworkX, Shapely, Z3, NumPy, Pandas, and Matplotlib.
 
-Current Direction:
+## Common Commands
 
-The line-GNN is useful as a conservative filter for generated crease patterns. A separate line-filtered GA smoke run was added without changing the original GA.
+Run the dashboard:
 
-Line-Filtered GA Smoke Run:
+```powershell
+python -m streamlit run streamlit_app.py
+```
 
-- Script: Genetic_Algo_Line_Filtered.py
-- Run settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
-- Best generated output: line_filtered_best_generated.pkl
-  - line-GNN valid probability: 0.0081
-  - predicted invalid
-  - mean Kawasaki residual: 1.7315
-  - mean Maekawa residual: 1.3333
-- Diverse top 6 output: line_filtered_diverse_top6.pkl
-  - all six predicted invalid
-  - mean Kawasaki residual: 0.7487
-  - mean Maekawa residual: 1.5297
+Run the final generator directly:
 
-The filter improved the line-GNN score slightly for the single best candidate and reduced Kawasaki residuals in the diverse set, but it did not produce valid line-GNN candidates in 20 generations. This suggests the next bottleneck is the GA repair/mutation operators, especially local Kawasaki/Maekawa repair, not just classifier scoring.
+```powershell
+python Genetic_Algo_Z3_Topology_Symmetry_Kawasaki.py
+```
 
-Gradient Geometry Repair Experiment:
+Evaluate line-graph classifier outputs:
 
-- Script: Genetic_Algo_Line_Filtered_Repaired.py
-- Repair utility: gradient_geometry_repair.py
-- Method: PyTorch gradient descent on mutable node coordinates, with border nodes fixed, targeting Kawasaki residual, mirror symmetry, and short-edge degeneracy. Repaired candidates are rejected if they introduce crease crossings.
-- Run settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
-- Initial seed repairs accepted: 22/30
-- Best repaired output: line_repaired_best_generated.pkl
-  - line-GNN valid probability: 0.0005
-  - predicted invalid
-  - mean Kawasaki residual: 0.9922
-  - mean Maekawa residual: 2.0000
-- Repaired diverse top 6: line_repaired_diverse_top6.pkl
-  - all six predicted invalid
-  - mean Kawasaki residual: 0.9327
-  - mean Maekawa residual: 1.8972
+```powershell
+python LineGraph_Tester.py
+```
 
-The gradient repair successfully lowers Kawasaki for selected candidates and can improve symmetry, but it cannot fix Maekawa because Maekawa depends on discrete mountain/valley counts, not coordinates. The next repair step should be a discrete fold-assignment repair for Maekawa, paired with the gradient Kawasaki/symmetry repair.
+Export a pickle graph or graph list to `.cp` files:
 
-Z3 Maekawa Repair Experiment:
+```powershell
+python export_generated_cp.py --input outputs/z3_symmetry_kawasaki/z3_symmetry_kawasaki_diverse_top6.pkl
+```
 
-- Repair utility: maekawa_z3_repair.py
-- Script: Genetic_Algo_Line_Filtered_Repaired_Z3.py
-- Method: one Z3 Boolean per non-border crease, with True=mountain and False=valley. Each interior vertex enforces Maekawa by requiring mountain count d/2-1 or d/2+1. The optimizer minimizes changed fold labels.
-- Existing repaired-output smoke check:
-  - line_repaired_best_generated.pkl: SAT, changed 6 creases, Maekawa 2.0000 -> 0.0000
-  - line_repaired_diverse_top6.pkl: 3/6 SAT; topology-unsat cases had odd non-border vertex degrees
-- GA smoke settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
-- GA result:
-  - Initial Z3 repairs: 30/30 topology_unsat
-  - Every generation stayed topology_unsat, so Z3 could not perform exact Maekawa repair by labels alone
-  - line_z3_best_generated.pkl: predicted invalid, valid probability 0.0000, mean Kawasaki 0.9821, mean Maekawa 1.1429
-  - line_z3_diverse_top6.pkl: all six predicted invalid, mean Kawasaki 0.7881, mean Maekawa 1.2549
+Test a single `.cp` file with the vertex-GNN:
 
-Conclusion: Z3 works when topology is Maekawa-satisfiable, but the current generator/mutations produce too many odd non-border vertex degrees. The next required change is topology repair or topology-aware mutation: enforce even non-border degree at interior vertices before Z3 label solving.
+```powershell
+python tester.py outputs/z3_symmetry_kawasaki/z3_symmetry_kawasaki_best_generated.cp
+```
 
-Even-Degree Topology Repair Experiment:
+## Final Pipeline Summary
 
-- Repair utility: topology_even_repair.py
-- Script: Genetic_Algo_Line_Filtered_Repaired_Z3_Topology.py
-- Method: before Z3, repair true interior non-border degree parity by removing safe odd-odd creases and odd interior-to-boundary creases. Boundary vertices are excluded from Maekawa constraints.
-- Existing output smoke check:
-  - line_z3_best_generated.pkl: topology bad vertices 12 -> 0, Z3 SAT, interior Maekawa 2.0000 -> 0.0000
-  - line_z3_diverse_top6.pkl: every top-6 candidate became Z3 SAT after topology repair
-- GA smoke settings: population_size=30, generations=20, elite_keep=6, mutations_per=3
-- GA result:
-  - Initial topology repairs: 16 repaired, 14 partial
-  - Initial Z3 repairs: 16 SAT, 14 topology_unsat
-  - By generation 20: 53/54 repair attempts were Z3 SAT
-  - line_topology_z3_best_generated.pkl: line-GNN predicted valid, valid probability 0.9246, mean Kawasaki 1.0385, exact interior Maekawa 0.0000
-  - line_topology_z3_diverse_top6.pkl: all six line-GNN predicted valid, valid probability range 0.8256-0.9472, exact interior Maekawa 0.0000
+The final generator starts from random planar graph seeds inside a square paper boundary. It evolves candidates using mutation, elitism, diversity selection, and learned validity scoring. Each candidate is repaired and filtered through:
 
-Note: LineGraph_Tester.py still prints the classifier-feature Maekawa summary, which includes boundary vertices because the line-GNN checkpoint was trained with those features. The exact Z3/interior Maekawa check for the topology-repaired outputs is 0.0000.
+1. topology repair for even non-border interior degree,
+2. Z3 Maekawa mountain-valley assignment,
+3. direct Kawasaki projection,
+4. gradient geometry repair,
+5. crossing checks and hard-gated fitness evaluation.
 
-
+The resulting candidates are exported as graph pickles, rendered PNGs, and editable `.cp` files.

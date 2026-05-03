@@ -1,11 +1,17 @@
 import pickle
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl", 'rb') as f:
+BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+OUTPUT_DIR = BASE / "outputs" / "misc"
+
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     positives = pickle.load(f)
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\negatives.pkl", 'rb') as f:
+with (DATA_DIR / "negatives.pkl").open('rb') as f:
     negatives = pickle.load(f)
 
 def get_stats(graphs):
@@ -67,6 +73,7 @@ for i, m in enumerate(metrics):
 
 plt.suptitle("Valid CPs vs Corrupted Negatives — Feature Distributions", fontsize=13)
 plt.tight_layout()
-plt.savefig(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\data_comparison.png", dpi=150)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+plt.savefig(OUTPUT_DIR / "data_comparison.png", dpi=150)
 plt.show()
 print("Plot saved")

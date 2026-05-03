@@ -33,6 +33,8 @@ import origami_constraints as oc
 from topology_even_repair import repair_even_nonborder_topology
 
 BASE    = str(Path(__file__).resolve().parent)
+OUTPUT_DIR = Path(BASE) / "outputs" / "line_kawasaki_z3"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 MAX_GEN = 80
 IN_CHAN = 10          # must match trained model
 SCALE   = 200.0
@@ -141,11 +143,11 @@ class GINClassifier(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(f"{BASE}\\best_model.pt", weights_only=False))
+model.load_state_dict(torch.load(Path(BASE) / "models" / "best_model.pt", weights_only=False))
 model.eval()
 print(f"GNN loaded on {device}  (in_channels={IN_CHAN})")
 
-with open(f"{BASE}\\graphs.pkl", 'rb') as f:
+with (Path(BASE) / "data" / "graphs.pkl").open('rb') as f:
     real_graphs = pickle.load(f)
 print(f"Loaded {len(real_graphs)} real CPs for novelty reference")
 
@@ -1243,7 +1245,7 @@ def run_ga(population_size=50, generations=MAX_GEN,
     for ax in axes.flatten():
         ax.set_xlabel('Generation')
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\line_kawasaki_z3_ga_convergence.png", dpi=150)
+    plt.savefig(OUTPUT_DIR / "line_kawasaki_z3_ga_convergence.png", dpi=150)
     plt.close(fig)
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
@@ -1261,7 +1263,7 @@ def run_ga(population_size=50, generations=MAX_GEN,
                   ax=axes.flatten()[i])
     plt.suptitle("Top 6 Topology + Z3 + Kawasaki-Projected Crease Patterns", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\line_kawasaki_z3_ga_top6.png", dpi=150)
+    plt.savefig(OUTPUT_DIR / "line_kawasaki_z3_ga_top6.png", dpi=150)
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
@@ -1275,12 +1277,12 @@ def run_ga(population_size=50, generations=MAX_GEN,
             ax=axes.flatten()[i])
     plt.suptitle("Top 6 Local Constraint Violation Heatmap", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\line_kawasaki_z3_violation_top6.png", dpi=150)
+    plt.savefig(OUTPUT_DIR / "line_kawasaki_z3_violation_top6.png", dpi=150)
     plt.close(fig)
 
-    with open(f"{BASE}\\line_kawasaki_z3_best_generated.pkl", 'wb') as f:
+    with (OUTPUT_DIR / "line_kawasaki_z3_best_generated.pkl").open('wb') as f:
         pickle.dump(best_ever, f)
-    with open(f"{BASE}\\line_kawasaki_z3_diverse_top6.pkl", 'wb') as f:
+    with (OUTPUT_DIR / "line_kawasaki_z3_diverse_top6.pkl").open('wb') as f:
         pickle.dump(diverse6, f)
     print("Saved line_kawasaki_z3_best_generated.pkl + line_kawasaki_z3_diverse_top6.pkl")
     return best_ever, scored, diverse6
@@ -1293,3 +1295,5 @@ if __name__ == "__main__":
         elite_keep=6,
         mutations_per=3,
     )
+
+

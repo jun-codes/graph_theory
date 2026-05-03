@@ -1,11 +1,13 @@
 import argparse
 import os
 import pickle
+from pathlib import Path
 
 from cp_io import write_cp_collection, write_cp_file
 
 
-BASE = r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project"
+BASE = Path(__file__).resolve().parent
+DEFAULT_OUTPUT_DIR = BASE / "outputs" / "baseline"
 
 
 def parse_args():
@@ -14,7 +16,7 @@ def parse_args():
     )
     parser.add_argument(
         "--input",
-        default=os.path.join(BASE, "best_generated.pkl"),
+        default=DEFAULT_OUTPUT_DIR / "best_generated.pkl",
         help="Path to a pickled NetworkX graph or a list of graphs.",
     )
     parser.add_argument(
@@ -49,12 +51,12 @@ def load_pickle(path):
 
 
 def default_single_output(input_path, suffix=""):
-    stem, _ = os.path.splitext(input_path)
+    stem, _ = os.path.splitext(str(input_path))
     return f"{stem}{suffix}.cp"
 
 
 def default_multi_output(input_path):
-    stem, _ = os.path.splitext(input_path)
+    stem, _ = os.path.splitext(str(input_path))
     return f"{stem}_cp"
 
 

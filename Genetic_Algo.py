@@ -15,6 +15,7 @@ import copy
 import math
 import pickle
 import random
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -45,7 +46,10 @@ KAW_TARGET_THRESHOLD = 0.02
 KAW_PATCH_HOPS = 1
 KAW_PATCH_MAX_NODES = 12
 
-BASE    = r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project"
+BASE    = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+MODEL_DIR = BASE / "models"
+OUTPUT_DIR = BASE / "outputs" / "baseline"
 MAX_GEN = 80
 IN_CHAN = 10          # must match trained model
 SCALE   = 200.0
@@ -186,11 +190,11 @@ class GINClassifier(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(f"{BASE}\\best_model.pt", weights_only=False))
+model.load_state_dict(torch.load(MODEL_DIR / "best_model.pt", weights_only=False))
 model.eval()
 print(f"GNN loaded on {device}  (in_channels={IN_CHAN})")
 
-with open(f"{BASE}\\graphs.pkl", 'rb') as f:
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     real_graphs = pickle.load(f)
 print(f"Loaded {len(real_graphs)} real CPs for novelty reference")
 print("Z3 Maekawa repair " + ("enabled" if repair_maekawa_z3 else "unavailable; using heuristic folds"))
@@ -1418,7 +1422,8 @@ def visualise_initial_population(population, filename="ga_initial_seeds.png"):
                   ax=axes.flatten()[i])
     plt.suptitle("Initial Population Seeds (Debug)", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\{filename}", dpi=150)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(OUTPUT_DIR / filename, dpi=150)
     plt.show()
     print(f"Saved initial population visualisation to {filename}")
 
@@ -1854,7 +1859,8 @@ def run_ga(population_size=30, generations=MAX_GEN,
     for ax in axes.flatten():
         ax.set_xlabel('Generation')
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\ga_convergence.png", dpi=150)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(OUTPUT_DIR / "ga_convergence.png", dpi=150)
     plt.show()
 
     # ── Top-6 diverse results ──────────────────────────────────────────────
@@ -1874,15 +1880,15 @@ def run_ga(population_size=30, generations=MAX_GEN,
                   ax=axes.flatten()[i])
     plt.suptitle("Top 6 Generated Crease Patterns (Diverse)", fontsize=13)
     plt.tight_layout()
-    plt.savefig(f"{BASE}\\ga_top6.png", dpi=150)
+    plt.savefig(OUTPUT_DIR / "ga_top6.png", dpi=150)
     plt.show()
 
-    with open(f"{BASE}\\best_generated.pkl", 'wb') as f:
+    with (OUTPUT_DIR / "best_generated.pkl").open('wb') as f:
         pickle.dump(best_ever, f)
-    with open(f"{BASE}\\diverse_top6.pkl", 'wb') as f:
+    with (OUTPUT_DIR / "diverse_top6.pkl").open('wb') as f:
         pickle.dump(diverse6, f)
-    write_cp_file(best_ever, f"{BASE}\\best_generated.cp")
-    write_cp_collection(diverse6, f"{BASE}\\diverse_top6_cp", prefix="rank")
+    write_cp_file(best_ever, OUTPUT_DIR / "best_generated.cp")
+    write_cp_collection(diverse6, OUTPUT_DIR / "diverse_top6_cp", prefix="rank")
     print("Saved best_generated.pkl + diverse_top6.pkl + editable .cp exports")
     return best_ever, scored, diverse6
 

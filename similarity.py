@@ -1,11 +1,17 @@
 import pickle
+from pathlib import Path
+
 import numpy as np
 import networkx as nx
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl", 'rb') as f:
+BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+OUTPUT_DIR = BASE / "outputs" / "z3_symmetry_kawasaki"
+
+with (DATA_DIR / "graphs.pkl").open('rb') as f:
     real_cps = pickle.load(f)
 
-with open(r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\best_generated.pkl", 'rb') as f:
+with (OUTPUT_DIR / "z3_symmetry_kawasaki_best_generated.pkl").open('rb') as f:
     generated = pickle.load(f)
 
 def graph_signature(G):

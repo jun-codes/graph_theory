@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import networkx as nx
 import numpy as np
 from collections import defaultdict
@@ -86,7 +87,8 @@ def parse_all_cp_files(cp_folder):
     print(f"Successfully parsed: {len(graphs)} graphs")
     return graphs
 
-cp_folder = r"C:\Users\Arjun\Downloads\dataset\cp_files"  
+BASE = Path(__file__).resolve().parent
+cp_folder = BASE / "dataset" / "cp_files"
 graphs = parse_all_cp_files(cp_folder)
 
 G = graphs[0]
@@ -100,8 +102,9 @@ import pickle
 for G in graphs:
     G.graph['label'] = 1
 
-output_path = r"C:\Users\Arjun\Desktop\code\Graph_Theory_Project\graphs.pkl"
-with open(output_path, 'wb') as f:
+output_path = BASE / "data" / "graphs.pkl"
+output_path.parent.mkdir(parents=True, exist_ok=True)
+with output_path.open('wb') as f:
     pickle.dump(graphs, f)
 
 print(f"Saved {len(graphs)} labeled graphs")

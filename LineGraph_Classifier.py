@@ -44,6 +44,8 @@ except ImportError as exc:
 
 
 BASE = Path(__file__).resolve().parent
+DATA_DIR = BASE / "data"
+MODEL_DIR = BASE / "models"
 
 
 def set_seed(seed: int) -> None:
@@ -193,9 +195,9 @@ def evaluate(model, loader, device):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train the line-graph CP classifier.")
-    parser.add_argument("--positives", type=Path, default=BASE / "graphs.pkl")
-    parser.add_argument("--negatives", type=Path, default=BASE / "negatives_v3.pkl")
-    parser.add_argument("--output", type=Path, default=BASE / "line_best_model.pt")
+    parser.add_argument("--positives", type=Path, default=DATA_DIR / "graphs.pkl")
+    parser.add_argument("--negatives", type=Path, default=DATA_DIR / "negatives_v3.pkl")
+    parser.add_argument("--output", type=Path, default=MODEL_DIR / "line_best_model.pt")
     parser.add_argument("--epochs", type=int, default=80)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--hidden", type=int, default=96)

@@ -28,7 +28,7 @@ from line_graph_features import (
 
 
 BASE = Path(__file__).resolve().parent
-DEFAULT_CHECKPOINT = BASE / "line_best_model.pt"
+DEFAULT_CHECKPOINT = BASE / "models" / "line_best_model.pt"
 
 
 @dataclass
