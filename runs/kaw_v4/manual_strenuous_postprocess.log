@@ -1,0 +1,59 @@
+Repairing best graph with strenuous profile
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+
+Repairing diverse graph 0
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+
+Repairing diverse graph 1
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+  repair round 4/6
+
+Repairing diverse graph 2
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+
+Repairing diverse graph 3
+  repair round 1/6
+  repair round 2/6
+
+Repairing diverse graph 4
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+
+Repairing diverse graph 5
+  repair round 1/6
+  repair round 2/6
+  repair round 3/6
+  repair round 4/6
+  repair round 5/6
+  repair round 6/6
+Saved manual Kawasaki + symmetry repair outputs:
+  runs\kaw_v4\manual_strenuous_kawasaki_symmetric_best_generated.pkl
+  runs\kaw_v4\manual_strenuous_kawasaki_symmetric_diverse_top6.pkl
+  runs\kaw_v4\manual_strenuous_kawasaki_symmetric_report.csv
+  runs\kaw_v4\manual_strenuous_kawasaki_symmetric_top6.png
+  runs\kaw_v4\manual_strenuous_kawasaki_symmetric_violation_top6.png
+
+Before:
+  [0] kaw=0.1659 max_kaw=1.0672 sym=0.1857
+  [1] kaw=0.1967 max_kaw=1.0527 sym=0.1876
+  [2] kaw=0.2140 max_kaw=0.9101 sym=0.1365
+  [3] kaw=0.1995 max_kaw=1.0527 sym=0.1865
+  [4] kaw=0.2342 max_kaw=1.0605 sym=0.1819
+  [5] kaw=0.1925 max_kaw=0.7952 sym=0.1290
+
+After:
+  [0] kaw=0.1105 max_kaw=0.9647 sym=0.1694
+  [1] kaw=0.1093 max_kaw=0.6352 sym=0.1630
+  [2] kaw=0.0843 max_kaw=0.8856 sym=0.1103
+  [3] kaw=0.1202 max_kaw=0.9150 sym=0.1734
+  [4] kaw=0.1061 max_kaw=0.8224 sym=0.1855
+  [5] kaw=0.0779 max_kaw=0.6038 sym=0.1180

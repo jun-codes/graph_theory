@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+runs/_launch_smoke/
+runs/_sp_smoke/
+runs/startprocess_*.log
+runs/startprocess_*.err.log
+runs/inner_powershell_test*.log
+runs/inner_powershell_test*.err.log
+runs/*/run.err.log
+runs/**/*.err.log
+runs/*/failed_*.log
+runs/*/startprocess_probe.log
+runs/*/startprocess_probe.err.log
