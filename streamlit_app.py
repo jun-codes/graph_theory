@@ -180,7 +180,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    st.title("Z3 Symmetry Kawasaki Origami Generator")
+    st.title("Origami Generator")
     st.caption("Generate crease-pattern graphs and download editable .cp files.")
 
     with st.sidebar:
