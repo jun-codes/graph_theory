@@ -194,7 +194,9 @@ class GINClassifier(torch.nn.Module):
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model  = GINClassifier().to(device)
-model.load_state_dict(torch.load(MODEL_DIR / "best_model.pt", weights_only=False))
+model.load_state_dict(
+    torch.load(MODEL_DIR / "best_model.pt", map_location=device, weights_only=False)
+)
 model.eval()
 print(f"GNN loaded on {device}  (in_channels={IN_CHAN})")
 
