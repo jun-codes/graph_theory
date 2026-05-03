@@ -1,0 +1,88 @@
+C:\Users\yuvra\AppData\Roaming\Python\Python312\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.3.0) or chardet (7.2.0)/charset_normalizer (3.4.1) doesn't match a supported version!
+  warnings.warn(
+GNN loaded on cuda  (in_channels=10)
+Loaded 626 real CPs for novelty reference
+Line-GNN filter loaded (threshold=0.50, weight=1.0)
+Gradient geometry repair enabled (Kawasaki + symmetry)
+Z3 Maekawa repair enabled
+Even-degree topology repair enabled
+Direct Kawasaki projection repair enabled
+Retry config: out_dir=C:\Users\yuvra\OneDrive\Desktop\spring 2026\GTNS\graph_theory\runs\kaw_v4_40p60g population_size=40 generations=60 elite_keep=8 mutations_per=5
+
+Starting GA — pop=40, gen=60
+Seeding from random planar graphs (genuine exploration mode)
+Seeded 40 random planar graphs
+Initial gradient repairs accepted: 29/40
+Initial topology repairs: {'repaired': 22, 'partial': 18} avg_removed=4.85 avg_added=0.03
+Initial Z3 repairs: {'sat': 22, 'topology_unsat': 18} avg_changed=2.45
+Initial Kawasaki projections accepted: 40/40 avg_kaw=1.992->1.841
+Gen 001 | fit=-0.5140 GNN=0.059 Kaw=0.801[w=0.36] Mae=0.000 Sym=0.000 Nov=0.047 Comp=1.00 Line=0.028 Lpen=0.472 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=-879.0493
+  Gradient repairs accepted this gen: 20/32
+  Topology repairs this gen: {'skipped': 10, 'partial': 18, 'repaired': 4} avg_removed=0.31 avg_added=0.00
+  Z3 repairs this gen: {'sat': 14, 'topology_unsat': 18} avg_changed=1.19
+  Kawasaki projections this gen: 30/32 avg_kaw=1.345->1.299
+Gen 005 | fit=0.1170 GNN=0.127 Kaw=0.293[w=0.39] Mae=0.000 Sym=0.200 Nov=0.090 Comp=1.00 Line=0.803 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-50.7687
+  Gradient repairs accepted this gen: 14/32
+  Topology repairs this gen: {'repaired': 17, 'skipped': 13, 'partial': 2} avg_removed=0.72 avg_added=0.00
+  Z3 repairs this gen: {'sat': 30, 'topology_unsat': 2} avg_changed=1.75
+  Kawasaki projections this gen: 28/32 avg_kaw=0.431->0.416
+Gen 010 | fit=0.5311 GNN=0.582 Kaw=0.341[w=0.42] Mae=0.000 Sym=0.200 Nov=0.120 Comp=1.00 Line=0.856 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=-25.1143
+  Gradient repairs accepted this gen: 16/32
+  Topology repairs this gen: {'repaired': 23, 'skipped': 8, 'partial': 1} avg_removed=0.84 avg_added=0.00
+  Z3 repairs this gen: {'sat': 31, 'topology_unsat': 1} avg_changed=1.69
+  Kawasaki projections this gen: 23/32 avg_kaw=0.344->0.333
+Gen 015 | fit=0.8210 GNN=0.870 Kaw=0.346[w=0.46] Mae=0.000 Sym=0.200 Nov=0.064 Comp=1.00 Line=0.872 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=0.4491
+  Gradient repairs accepted this gen: 18/32
+  Topology repairs this gen: {'skipped': 9, 'repaired': 19, 'partial': 4} avg_removed=0.69 avg_added=0.00
+  Z3 repairs this gen: {'sat': 28, 'topology_unsat': 4} avg_changed=1.47
+  Kawasaki projections this gen: 25/32 avg_kaw=0.447->0.427
+Gen 020 | fit=0.8802 GNN=0.891 Kaw=0.310[w=0.50] Mae=0.000 Sym=0.100 Nov=0.069 Comp=1.00 Line=0.939 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=-75.2718
+  [Gen 20] Injected 4 repaired random seeds
+  Gradient repairs accepted this gen: 20/36
+  Topology repairs this gen: {'skipped': 15, 'repaired': 18, 'partial': 3} avg_removed=1.11 avg_added=0.00
+  Z3 repairs this gen: {'sat': 33, 'topology_unsat': 3} avg_changed=1.86
+  Kawasaki projections this gen: 29/36 avg_kaw=0.615->0.576
+Gen 025 | fit=0.9542 GNN=0.938 Kaw=0.255[w=0.54] Mae=0.000 Sym=0.100 Nov=0.039 Comp=1.00 Line=0.883 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=0.5776
+  Gradient repairs accepted this gen: 18/32
+  Topology repairs this gen: {'repaired': 15, 'skipped': 15, 'partial': 2} avg_removed=0.56 avg_added=0.00
+  Z3 repairs this gen: {'sat': 30, 'topology_unsat': 2} avg_changed=1.72
+  Kawasaki projections this gen: 25/32 avg_kaw=0.411->0.390
+Gen 030 | fit=0.9483 GNN=0.940 Kaw=0.255[w=0.57] Mae=0.000 Sym=0.100 Nov=0.034 Comp=1.00 Line=0.878 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-24.3077
+  Gradient repairs accepted this gen: 8/32
+  Topology repairs this gen: {'skipped': 26, 'repaired': 5, 'partial': 1} avg_removed=0.22 avg_added=0.00
+  Z3 repairs this gen: {'sat': 31, 'topology_unsat': 1} avg_changed=1.66
+  Kawasaki projections this gen: 21/32 avg_kaw=0.309->0.299
+Gen 035 | fit=0.9586 GNN=0.934 Kaw=0.185[w=0.61] Mae=0.000 Sym=0.100 Nov=0.091 Comp=1.00 Line=0.895 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=-74.6527
+  Gradient repairs accepted this gen: 8/32
+  Topology repairs this gen: {'repaired': 13, 'skipped': 15, 'partial': 4} avg_removed=0.50 avg_added=0.00
+  Z3 repairs this gen: {'sat': 28, 'topology_unsat': 4} avg_changed=1.34
+  Kawasaki projections this gen: 21/32 avg_kaw=0.425->0.389
+Gen 040 | fit=0.9670 GNN=0.941 Kaw=0.190[w=0.65] Mae=0.000 Sym=0.100 Nov=0.050 Comp=1.00 Line=0.835 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-49.5103
+  [Gen 40] Injected 4 repaired random seeds
+  Gradient repairs accepted this gen: 18/36
+  Topology repairs this gen: {'skipped': 15, 'repaired': 19, 'partial': 2} avg_removed=1.14 avg_added=0.00
+  Z3 repairs this gen: {'sat': 34, 'topology_unsat': 2} avg_changed=1.94
+  Kawasaki projections this gen: 26/36 avg_kaw=0.665->0.616
+Gen 045 | fit=0.9685 GNN=0.940 Kaw=0.170[w=0.69] Mae=0.000 Sym=0.100 Nov=0.067 Comp=1.00 Line=0.885 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-99.2757
+  Gradient repairs accepted this gen: 8/32
+  Topology repairs this gen: {'skipped': 18, 'repaired': 10, 'partial': 4} avg_removed=0.41 avg_added=0.00
+  Z3 repairs this gen: {'sat': 28, 'topology_unsat': 4} avg_changed=1.69
+  Kawasaki projections this gen: 19/32 avg_kaw=0.343->0.321
+Gen 050 | fit=0.9778 GNN=0.940 Kaw=0.169[w=0.72] Mae=0.000 Sym=0.100 Nov=0.016 Comp=1.00 Line=0.887 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=repaired KProj=accepted | Mean=-274.5512
+  Gradient repairs accepted this gen: 6/32
+  Topology repairs this gen: {'repaired': 14, 'partial': 3, 'skipped': 15} avg_removed=0.59 avg_added=0.00
+  Z3 repairs this gen: {'sat': 29, 'topology_unsat': 3} avg_changed=1.53
+  Kawasaki projections this gen: 23/32 avg_kaw=0.363->0.333
+Gen 055 | fit=0.9753 GNN=0.940 Kaw=0.153[w=0.76] Mae=0.000 Sym=0.100 Nov=0.044 Comp=1.00 Line=0.910 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-199.4476
+  Gradient repairs accepted this gen: 5/32
+  Topology repairs this gen: {'repaired': 15, 'skipped': 17} avg_removed=0.56 avg_added=0.00
+  Z3 repairs this gen: {'sat': 32} avg_changed=2.12
+  Kawasaki projections this gen: 25/32 avg_kaw=0.315->0.279
+Gen 060 | fit=0.9773 GNN=0.938 Kaw=0.146[w=0.80] Mae=0.000 Sym=0.100 Nov=0.031 Comp=1.00 Line=0.905 Lpen=0.000 Z3pen=0.0 Z3=sat Topo=skipped KProj=accepted | Mean=-450.3873
+  [Gen 60] Injected 4 repaired random seeds
+  Gradient repairs accepted this gen: 12/36
+  Topology repairs this gen: {'repaired': 19, 'skipped': 15, 'partial': 2} avg_removed=1.06 avg_added=0.00
+  Z3 repairs this gen: {'sat': 34, 'topology_unsat': 2} avg_changed=2.19
+  Kawasaki projections this gen: 27/36 avg_kaw=0.565->0.492
+
+GA complete — best fitness: 0.9815
