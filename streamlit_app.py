@@ -21,16 +21,81 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 ROOT = Path(__file__).resolve().parent
 PREFIX = "z3_symmetry_kawasaki"
+ARTIFACT_TAG = "1"
 
-TOP6_IMAGE = ROOT / f"{PREFIX}_ga_top6.png"
-BEST_PKL = ROOT / f"{PREFIX}_best_generated.pkl"
-DIVERSE_PKL = ROOT / f"{PREFIX}_diverse_top6.pkl"
-BEST_CP = ROOT / f"{PREFIX}_best_generated.cp"
-CP_DIR = ROOT / f"{PREFIX}_diverse_top6_cp"
 RUN_LOG = ROOT / f"{PREFIX}_streamlit_run.log"
-DASHBOARD_IMAGE = ROOT / "dashboard.png"
-GITHUB_REPO_URL = "https://github.com/jun-codes/graph_theory"
-DASHBOARD_URL = "https://origamigenerator.streamlit.app/"
+
+
+def newest_existing(*paths: Path) -> Path:
+    existing = [path for path in paths if path.exists()]
+    if existing:
+        return max(existing, key=lambda path: path.stat().st_mtime_ns)
+    return paths[0]
+
+
+def refresh_artifact_paths() -> None:
+    global TOP6_IMAGE, CONVERGENCE_IMAGE, VIOLATION_IMAGE, BEST_PKL, DIVERSE_PKL, BEST_CP, CP_DIR
+
+    TOP6_IMAGE = newest_existing(
+        ROOT / f"{PREFIX}_ga_top6_{ARTIFACT_TAG}.png",
+        ROOT / f"{PREFIX}_ga_top6.png",
+    )
+    CONVERGENCE_IMAGE = newest_existing(
+        ROOT / f"{PREFIX}_ga_convergence_{ARTIFACT_TAG}.png",
+        ROOT / f"{PREFIX}_ga_convergence{ARTIFACT_TAG}.png",
+        ROOT / f"{PREFIX}_ga_convergence.png",
+    )
+    VIOLATION_IMAGE = newest_existing(
+        ROOT / f"{PREFIX}_violation_top6_{ARTIFACT_TAG}.png",
+        ROOT / f"{PREFIX}_violation_top6.png",
+    )
+    BEST_PKL = newest_existing(
+        ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.pkl",
+        ROOT / f"{PREFIX}_best_generated.pkl",
+    )
+    DIVERSE_PKL = newest_existing(
+        ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}.pkl",
+        ROOT / f"{PREFIX}_diverse_top6.pkl",
+    )
+    BEST_CP = newest_existing(
+        ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.cp",
+        ROOT / f"{PREFIX}_best_generated.cp",
+    )
+    CP_DIR = newest_existing(
+        ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}_cp",
+        ROOT / f"{PREFIX}_diverse_top6_cp",
+    )
+
+
+TOP6_IMAGE = newest_existing(
+    ROOT / f"{PREFIX}_ga_top6_{ARTIFACT_TAG}.png",
+    ROOT / f"{PREFIX}_ga_top6.png",
+)
+CONVERGENCE_IMAGE = newest_existing(
+    ROOT / f"{PREFIX}_ga_convergence_{ARTIFACT_TAG}.png",
+    ROOT / f"{PREFIX}_ga_convergence{ARTIFACT_TAG}.png",
+    ROOT / f"{PREFIX}_ga_convergence.png",
+)
+VIOLATION_IMAGE = newest_existing(
+    ROOT / f"{PREFIX}_violation_top6_{ARTIFACT_TAG}.png",
+    ROOT / f"{PREFIX}_violation_top6.png",
+)
+BEST_PKL = newest_existing(
+    ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.pkl",
+    ROOT / f"{PREFIX}_best_generated.pkl",
+)
+DIVERSE_PKL = newest_existing(
+    ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}.pkl",
+    ROOT / f"{PREFIX}_diverse_top6.pkl",
+)
+BEST_CP = newest_existing(
+    ROOT / f"{PREFIX}_best_generated_{ARTIFACT_TAG}.cp",
+    ROOT / f"{PREFIX}_best_generated.cp",
+)
+CP_DIR = newest_existing(
+    ROOT / f"{PREFIX}_diverse_top6_{ARTIFACT_TAG}_cp",
+    ROOT / f"{PREFIX}_diverse_top6_cp",
+)
 
 
 def load_pickle(path: Path):
@@ -145,12 +210,29 @@ def run_algorithm(
 
 
 def render_artifacts() -> None:
+    refresh_artifact_paths()
     st.subheader("Generated Candidates")
 
     if TOP6_IMAGE.exists():
         st.image(TOP6_IMAGE.read_bytes(), caption=TOP6_IMAGE.name, use_container_width=True)
     else:
         st.info("No top-6 image exists yet. Run the algorithm to generate one.")
+
+    artifact_cols = st.columns(2)
+    if CONVERGENCE_IMAGE.exists():
+        with artifact_cols[0]:
+            st.image(
+                CONVERGENCE_IMAGE.read_bytes(),
+                caption=CONVERGENCE_IMAGE.name,
+                use_container_width=True,
+            )
+    if VIOLATION_IMAGE.exists():
+        with artifact_cols[1]:
+            st.image(
+                VIOLATION_IMAGE.read_bytes(),
+                caption=VIOLATION_IMAGE.name,
+                use_container_width=True,
+            )
 
     rows = graph_rows()
     if rows:
@@ -236,25 +318,6 @@ def main() -> None:
 
     st.title("Origami Generator")
     st.caption("Generate theorem-repaired crease-pattern graphs and download editable .cp files.")
-
-    st.markdown(
-        f"[GitHub repository]({GITHUB_REPO_URL}) | [Public Streamlit dashboard]({DASHBOARD_URL})"
-    )
-
-    with st.expander("Dashboard, dataset, and reusable code", expanded=True):
-        st.write(
-            "This dashboard exposes the Z3, topology, symmetry, and Kawasaki-repaired "
-            "generation pipeline as a reusable interface. It shows the top generated "
-            "crease patterns, reports local constraint diagnostics, and packages the "
-            "best and diverse top-six candidates as editable CP files."
-        )
-        st.write(
-            "The bundled CP dataset is stored in "
-            f"`{CP_DIR.name}/` plus `{BEST_CP.name}`. These files can be opened in "
-            "crease-pattern tools or reused as generated examples for later experiments."
-        )
-        if DASHBOARD_IMAGE.exists():
-            st.image(DASHBOARD_IMAGE.read_bytes(), caption="Dashboard screenshot", use_container_width=True)
 
     with st.sidebar:
         st.header("Run Settings")
